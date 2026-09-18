@@ -295,16 +295,19 @@ export default function Home() {
                   const isFailed = task.score === 'FAILED';
                   return (
                     <div key={task.id} onClick={() => setAccomplishmentConfig({ task, mode: 'review' })} className={`group flex items-center justify-between p-3.5 px-4 rounded-xl hover:bg-neutral-900/80 border cursor-pointer ${isFailed ? 'bg-red-950/20 border-red-900/50' : 'bg-neutral-950/70 border-neutral-800/40'}`}>
-                      <div className="flex items-center gap-3.5 min-w-0">
+                      <div className="flex items-center gap-3.5 min-w-0 w-full pr-4">
                         <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${isFailed ? 'bg-red-500 text-white' : 'bg-white text-black'}`}>
                           {isFailed ? <AlertCircle className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
                         </div>
-                        <div>
-                          <p className={`text-sm font-medium ${isFailed ? 'text-red-200' : 'text-neutral-200'}`}>{task.title}</p>
+                        
+                        {/* FIX: We added overflow-hidden and truncate to this text container so it respects mobile boundaries! */}
+                        <div className="min-w-0 flex-1 overflow-hidden">
+                          <p className={`text-sm font-medium truncate ${isFailed ? 'text-red-200' : 'text-neutral-200'}`}>{task.title}</p>
                           <div className="flex items-center gap-2 mt-0.5 text-xs text-neutral-500">
-                            <span className="font-mono">Finished {task.completedAt}</span>
-                            {task.score && <><span className="text-neutral-600">•</span><span className={`font-mono font-bold text-xs px-1.5 py-0.5 rounded ${isFailed ? 'bg-red-500 text-white' : 'text-black bg-white'}`}>{task.score}</span></>}
-                            {task.reflection && <><span className="text-neutral-600">•</span><span className="text-neutral-400 italic truncate max-w-xs sm:max-w-md">"{task.reflection}"</span></>}
+                            <span className="font-mono shrink-0">Finished {task.completedAt}</span>
+                            {task.score && <><span className="text-neutral-600 shrink-0">•</span><span className={`font-mono font-bold text-xs px-1.5 py-0.5 rounded shrink-0 ${isFailed ? 'bg-red-500 text-white' : 'text-black bg-white'}`}>{task.score}</span></>}
+                            {/* FIX: truncate forces the text to drop to '...' when it hits the edge of the phone screen */}
+                            {task.reflection && <><span className="text-neutral-600 shrink-0">•</span><span className="text-neutral-400 italic truncate min-w-0">"{task.reflection}"</span></>}
                           </div>
                         </div>
                       </div>
