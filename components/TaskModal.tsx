@@ -64,20 +64,18 @@ export default function TaskModal({ isOpen, onClose, onSave, onDelete, initialTa
     e.preventDefault();
     if (!title.trim() || !deadline) return;
 
-    // Formatting the starter text just like your UI expects
     const formattedStarter = microStep.trim()
       ? (microStep.toLowerCase().startsWith('starter:') ? microStep.trim() : `starter: ${microStep.trim()}`)
       : (rail === 'urgent' ? 'starter: Launch workspace & review first item' : 'starter: Skim initial architecture notes');
 
-    // Base light color matches your UI vibe (Amber for urgent, White for exploration)
-    // (Red is handled dynamically by TaskCard when time runs out)
     const resolvedLightColor = rail === 'urgent' ? 'amber' : 'white';
 
     const taskData: Task = {
       id: initialTask ? initialTask.id : '',
       rail,
       title: title.trim(),
-      deadline, 
+      // FIX: Force absolute UTC string from the browser so the server never guesses the timezone
+      deadline: new Date(deadline).toISOString(), 
       importanceLevel,
       lightColor: resolvedLightColor,
       microStep: formattedStarter,
@@ -127,20 +125,15 @@ export default function TaskModal({ isOpen, onClose, onSave, onDelete, initialTa
                 <button key={lvl} type="button" onClick={() => setImportanceLevel(lvl)} className={`flex-1 py-1.5 rounded-lg text-xs font-mono font-bold border transition-all ${importanceLevel === lvl ? 'bg-white text-black border-white shadow-sm' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'}`}>{lvl}</button>
               ))}
             </div>
-            {/* Live Preview of the Lights! */}
-            <div className="pt-1">
-              <ImportanceLightsHeader level={importanceLevel} lightColor={rail === 'urgent' ? 'amber' : 'white'} />
-            </div>
+            <div className="pt-1"><ImportanceLightsHeader level={importanceLevel} lightColor={rail === 'urgent' ? 'amber' : 'white'} className="mb-0 mt-1" /></div>
           </div>
 
           <div className="flex flex-col gap-3 p-4 bg-neutral-950 border border-neutral-800 rounded-xl">
             <div>
               <label className="text-xs text-neutral-300 flex items-center gap-1.5 mb-1 font-semibold"><Clock className="w-3 h-3 text-neutral-400" /><span>Target Deadline</span></label>
-              {/* Using native datetime-local for accurate Database syncing */}
               <input type="datetime-local" required value={deadline} onChange={(e) => setDeadline(e.target.value)} className="w-full bg-black border border-neutral-800 rounded-lg focus:border-white px-3 py-1.5 text-xs text-white placeholder-neutral-600 outline-none font-mono [color-scheme:dark]" />
             </div>
 
-            {/* NEW: Red Laser & Alerts replace the old isCritical checkbox */}
             {rail === 'urgent' && (
               <div className="grid grid-cols-2 gap-3 pt-2 mt-1 border-t border-neutral-800/50">
                 <div>
