@@ -15,7 +15,8 @@ model Task {
   importanceLevel Int      @default(3)
   lightColor      String   
   microStep       String
-  
+  warningThresholdMin     Int      @default(120) // Minutes before deadline to turn red
+  notificationIntervalMin Int?     // Minutes between alerts (null = no alerts)
   status          String   @default("ACTIVE") 
   score           String?
   reflection      String?

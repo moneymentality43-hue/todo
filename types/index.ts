@@ -2,14 +2,19 @@ export interface Task {
   id: string;
   rail: 'urgent' | 'exploration';
   title: string;
-  deadline: Date | string; // Handled as Date object or ISO string
+  deadline: string | Date; 
   importanceLevel: number;
-  lightColor: 'white' | 'red' | 'amber' | 'yellow';
-  microStep: string;
-  status?: string;
-  presetAccomplishment?: string;
-  presetScore?: string;
-  completedAt?: string;
-  score?: string;
-  reflection?: string;
+  lightColor: string;
+  microStep?: string;
+
+  // --- NEW SETTINGS ---
+  warningThresholdMin: number;
+  notificationIntervalMin?: number | null;
+
+  status: 'ACTIVE' | 'COMPLETED' | 'FAILED';
+  score?: string | null;
+  reflection?: string | null;
+  completedAt?: string | null;
+  
+  // (Plus any other old UI properties you have like presetAccomplishment, etc.)
 }

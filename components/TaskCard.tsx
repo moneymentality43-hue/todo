@@ -2,6 +2,7 @@ import React from 'react';
 import { Check, Pencil } from 'lucide-react';
 import { Task } from '../types';
 import ImportanceLightsHeader from './ImportanceLightsHeader';
+import { playSound } from '../audio'; // Added sound import
 
 interface TaskCardProps {
   task: Task;
@@ -31,20 +32,31 @@ export default function TaskCard({ task, currentTime, onStart, onComplete, onEdi
     remainingText = `${minutesLeft}m left`;
   }
 
-  // SMART LOGIC: If it's a mandatory task AND < 2 hours left, FORCE CRITICAL RED STATE
-  const isDanger = task.rail === 'urgent' && timeDiffMs <= (2 * 60 * 60 * 1000);
+  // BUG FIX: Use custom threshold instead of hardcoded 2 hours
+  const thresholdMin = task.warningThresholdMin ?? 120;
+  const thresholdMs = thresholdMin * 60 * 1000;
+
+  // SMART LOGIC: If it's a mandatory task AND time left is below the CUSTOM threshold, FORCE CRITICAL RED STATE
+  const isDanger = task.rail === 'urgent' && timeDiffMs <= thresholdMs && timeDiffMs > 0;
 
   // Override visuals if in danger
   const finalLevel = isDanger ? 5 : task.importanceLevel;
-  const finalLightColor = isDanger ? 'red' : task.lightColor;
+  // FIX: Added TS cast to prevent strict-type error
+  const finalLightColor = (isDanger ? 'red' : task.lightColor) as 'white' | 'red' | 'amber' | 'yellow';
   
   const borderClasses = isDanger 
     ? 'border-red-500 shadow-[0_0_0_1px_rgba(239,68,68,0.4)]'
     : 'border-[#262626] hover:border-neutral-400';
 
+  // NEW: Handler to play focus sound before starting
+  const handleStart = () => {
+    playSound('focus');
+    onStart(task);
+  };
+
   return (
     <div
-      onClick={() => onStart(task)}
+      onClick={handleStart} // Used new handler here
       tabIndex={0}
       role="button"
       className={`group relative text-left p-5 rounded-2xl cursor-pointer transition-all duration-200 select-none bg-[#141414] border ${borderClasses}`}

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Target, Check } from 'lucide-react';
 import { Task } from '../types';
 import ImportanceLightsHeader from './ImportanceLightsHeader';
+import { playSound } from '../audio'; // Added sound import
 
 interface AccomplishmentModalProps {
   task: Task;
@@ -11,17 +12,22 @@ interface AccomplishmentModalProps {
 }
 
 export default function AccomplishmentModal({ task, mode, onClose, onSave }: AccomplishmentModalProps) {
+  // FIX: Removed 'presetAccomplishment' since it's not in the DB schema
   const [text, setText] = useState(
     mode === 'review' 
       ? (task.reflection || '') 
-      : (task.presetAccomplishment || (task.microStep ? `Finished: ${task.microStep}` : ''))
+      : (task.microStep ? `Finished: ${task.microStep}` : '')
   );
   
+  // FIX: Removed 'presetScore' since it's not in the DB schema
   const [score, setScore] = useState(
     mode === 'review' 
       ? (task.score ? task.score.replace('%', '') : '100')
-      : (task.presetScore || '100')
+      : '100'
   );
+
+  // FIX: Explicitly cast lightColor to satisfy TypeScript
+  const safeLightColor = (task.lightColor || 'white') as 'white' | 'red' | 'amber' | 'yellow';
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
@@ -34,9 +40,8 @@ export default function AccomplishmentModal({ task, mode, onClose, onSave }: Acc
         </div>
         
         <div className="p-4 bg-[#141414] border border-[#262626] rounded-xl flex flex-col">
-          <ImportanceLightsHeader level={task.importanceLevel || 4} lightColor={task.lightColor || 'white'} />
+          <ImportanceLightsHeader level={task.importanceLevel || 4} lightColor={safeLightColor} />
           
-          {/* BUG FIX: Converted Date object to readable string and cleaned up the old timeRemaining text */}
           <p className="text-xs font-mono text-neutral-400 mb-1">
             Target: {new Date(task.deadline).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
             {task.completedAt && ` • Logged ${task.completedAt}`}
@@ -67,7 +72,15 @@ export default function AccomplishmentModal({ task, mode, onClose, onSave }: Acc
 
         <div className="flex items-center justify-end gap-3 pt-3 border-t border-neutral-800 mt-1">
           <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl text-xs font-medium text-neutral-400 hover:text-white hover:bg-neutral-900 border border-transparent transition-all">Cancel</button>
-          <button type="button" onClick={() => onSave(task, text, score, mode)} className="px-6 py-2.5 rounded-full bg-white text-black font-bold text-xs hover:bg-neutral-200 active:scale-95 transition-all flex items-center gap-2 shadow-sm">
+          <button 
+            type="button" 
+            onClick={() => {
+              // Play success sound before saving
+              if (mode === 'complete') playSound('success');
+              onSave(task, text, score, mode);
+            }} 
+            className="px-6 py-2.5 rounded-full bg-white text-black font-bold text-xs hover:bg-neutral-200 active:scale-95 transition-all flex items-center gap-2 shadow-sm"
+          >
             <Check className="w-4 h-4 text-black stroke-[3]" /><span>Save & Close</span>
           </button>
         </div>

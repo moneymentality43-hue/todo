@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, ChevronDown, ChevronRight, Check, AlertCircle, RotateCcw } from 'lucide-react';
 import { Task } from '../types';
 import TaskCard from '../components/TaskCard';
@@ -8,6 +8,7 @@ import FocusOverlay from '../components/FocusOverlay';
 import AccomplishmentModal from '../components/AccomplishmentModal';
 import TaskModal from '../components/TaskModal';
 import CriticalLockdownModal from '../components/CriticalLockdownModal';
+import { playSound } from '../audio'; // Added sound import
 
 import { 
   getTasks, createTaskAction, updateTaskAction, 
@@ -29,12 +30,15 @@ export default function Home() {
   const [taskModalRail, setTaskModalRail] = useState<'urgent' | 'exploration'>('urgent');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
 
-  // Realtime Clock & Exact Date Object
+  // Realtime Clock
   const [currentTime, setCurrentTime] = useState('');
   const [currentDate, setCurrentDate] = useState('');
   const [currentDateObj, setCurrentDateObj] = useState(new Date());
 
-  // 1. Fetch REAL tasks from the database when the app loads
+  // NEW: Tracking when we last sent a notification so we don't spam
+  const lastAlertTimes = useRef<Record<string, number>>({});
+
+  // 1. Fetch REAL tasks and ask for Notification Permission
   useEffect(() => {
     async function loadData() {
       try {
@@ -48,28 +52,67 @@ export default function Home() {
       }
     }
     loadData();
+
+    // Request browser notification permission on load
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+        Notification.requestPermission();
+      }
+    }
   }, []);
 
-  // 2. Real-time Clock & Lockdown Checker
+  // 2. Real-time Clock, Lockdown Checker, AND Harassment Protocol (Notifications)
   useEffect(() => {
     const updateTimeAndCheckDeadlines = () => {
       const now = new Date();
+      const nowMs = now.getTime();
       setCurrentDateObj(now);
       setCurrentTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }));
       setCurrentDate(now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }));
 
       if (!lockedTask && tasks.length > 0) {
-        const expiredTask = tasks.find(t => {
-          if (t.rail !== 'urgent') return false;
-          return new Date(t.deadline) < now; 
-        });
+        // Find if any task has breached the deadline (Lockdown)
+        const expiredTask = tasks.find(t => t.rail === 'urgent' && new Date(t.deadline).getTime() < nowMs);
 
         if (expiredTask) {
           setLockedTask(expiredTask);
           setActiveFocusTask(null); 
           setAccomplishmentConfig(null);
           setIsTaskModalOpen(false);
+          return; // Stop processing other alerts if we are locked down
         }
+
+        // Check for Red Laser Notifications
+        tasks.forEach(t => {
+          if (t.rail !== 'urgent') return;
+
+          const deadlineMs = new Date(t.deadline).getTime();
+          const minutesRemaining = (deadlineMs - nowMs) / (1000 * 60);
+          const threshold = t.warningThresholdMin ?? 120;
+
+          const isCritical = minutesRemaining <= threshold && minutesRemaining > 0;
+
+          // If task is in the Red Laser zone AND has a notification interval set
+          if (isCritical && t.notificationIntervalMin) {
+            const lastAlert = lastAlertTimes.current[t.id] || 0;
+            const intervalMs = t.notificationIntervalMin * 60 * 1000;
+
+            // If we've never alerted, or the interval has passed since the last alert
+            if (nowMs - lastAlert >= intervalMs) {
+              // FIRE NOTIFICATION!
+              if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification(`⚠️ SYSTEM WARNING`, {
+                  body: `Task "${t.title}" locks down in ${Math.ceil(minutesRemaining)} minutes!`,
+                });
+              }
+              // TRIGGER THE SYNTHETIC ALERT SOUND
+              playSound('alert');
+              
+              // Record the exact time we sent this alert
+              lastAlertTimes.current[t.id] = nowMs;
+            }
+          }
+        });
       }
     };
     
@@ -79,7 +122,6 @@ export default function Home() {
   }, [tasks, lockedTask]);
 
   // --- Database Handlers ---
-  
   const handleSaveTask = async (savedTask: Task) => {
     try {
       if (editingTask) {
@@ -98,7 +140,6 @@ export default function Home() {
 
   const handleDeleteTask = async (taskId: string) => {
     try {
-      // Deletes the REAL task from the database
       await deleteTaskAction(taskId);
       setTasks(tasks.filter(t => t.id !== taskId));
     } catch (e) {
@@ -203,7 +244,6 @@ export default function Home() {
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8 flex flex-col gap-8">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-          
           <section className="flex flex-col gap-4">
             {urgentTasks.length === 0 ? (
               <div className="p-8 rounded-2xl border border-dashed border-neutral-800/40 bg-neutral-950/60 text-center">
