@@ -1,69 +1,303 @@
-import Image from "next/image";
+"use client";
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { Plus, ChevronDown, ChevronRight, Check, AlertCircle, RotateCcw } from 'lucide-react';
+import { Task } from '../types';
+import TaskCard from '../components/TaskCard';
+import FocusOverlay from '../components/FocusOverlay';
+import AccomplishmentModal from '../components/AccomplishmentModal';
+import TaskModal from '../components/TaskModal';
+import CriticalLockdownModal from '../components/CriticalLockdownModal';
+
+import { 
+  getTasks, createTaskAction, updateTaskAction, 
+  deleteTaskAction, completeTaskAction, restoreTaskAction 
+} from './actions';
 
 export default function Home() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [completedTasks, setCompletedTasks] = useState<Task[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isCompletedExpanded, setIsCompletedExpanded] = useState(true);
+
+  // States for Overlays & Modals
+  const [activeFocusTask, setActiveFocusTask] = useState<Task | null>(null);
+  const [accomplishmentConfig, setAccomplishmentConfig] = useState<{task: Task, mode: 'complete'|'review'} | null>(null);
+  const [lockedTask, setLockedTask] = useState<Task | null>(null);
+  
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+  const [taskModalRail, setTaskModalRail] = useState<'urgent' | 'exploration'>('urgent');
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+
+  // Realtime Clock & Exact Date Object
+  const [currentTime, setCurrentTime] = useState('');
+  const [currentDate, setCurrentDate] = useState('');
+  const [currentDateObj, setCurrentDateObj] = useState(new Date());
+
+  // 1. Fetch REAL tasks from the database when the app loads
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const allTasks = await getTasks();
+        setTasks(allTasks.filter(t => t.status === 'ACTIVE') as Task[]);
+        setCompletedTasks(allTasks.filter(t => t.status !== 'ACTIVE') as Task[]);
+      } catch (error) {
+        console.error("Database connection failed:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadData();
+  }, []);
+
+  // 2. Real-time Clock & Lockdown Checker
+  useEffect(() => {
+    const updateTimeAndCheckDeadlines = () => {
+      const now = new Date();
+      setCurrentDateObj(now);
+      setCurrentTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }));
+      setCurrentDate(now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }));
+
+      if (!lockedTask && tasks.length > 0) {
+        const expiredTask = tasks.find(t => {
+          if (t.rail !== 'urgent') return false;
+          return new Date(t.deadline) < now; 
+        });
+
+        if (expiredTask) {
+          setLockedTask(expiredTask);
+          setActiveFocusTask(null); 
+          setAccomplishmentConfig(null);
+          setIsTaskModalOpen(false);
+        }
+      }
+    };
+    
+    updateTimeAndCheckDeadlines();
+    const interval = setInterval(updateTimeAndCheckDeadlines, 1000);
+    return () => clearInterval(interval);
+  }, [tasks, lockedTask]);
+
+  // --- Database Handlers ---
+  
+  const handleSaveTask = async (savedTask: Task) => {
+    try {
+      if (editingTask) {
+        const updated = await updateTaskAction(savedTask.id, savedTask);
+        setTasks(tasks.map(t => t.id === updated.id ? (updated as Task) : t));
+      } else {
+        const created = await createTaskAction(savedTask);
+        setTasks([created as Task, ...tasks]);
+      }
+    } catch (e) {
+      console.error("Failed to save task to DB", e);
+    }
+    setIsTaskModalOpen(false);
+    setEditingTask(null);
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      // Deletes the REAL task from the database
+      await deleteTaskAction(taskId);
+      setTasks(tasks.filter(t => t.id !== taskId));
+    } catch (e) {
+      console.error("Failed to delete task", e);
+    }
+    setIsTaskModalOpen(false);
+    setEditingTask(null);
+  };
+
+  const handleSaveAccomplishment = async (task: Task, text: string, score: string, mode: 'complete' | 'review') => {
+    const formattedScore = score.includes('%') ? score : `${score}%`;
+    try {
+      if (mode === 'complete') {
+        const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+        const completedTask = await completeTaskAction(task.id, formattedScore, text, nowStr, false);
+        setTasks(prev => prev.filter(t => t.id !== task.id));
+        setCompletedTasks(prev => [completedTask as Task, ...prev]);
+      } else {
+        const updatedTask = await completeTaskAction(task.id, formattedScore, text, task.completedAt || '', task.score === 'FAILED');
+        setCompletedTasks(prev => prev.map(t => t.id === task.id ? (updatedTask as Task) : t));
+      }
+    } catch (e) {
+      console.error("Failed to save accomplishment", e);
+    }
+    setAccomplishmentConfig(null);
+  };
+
+  const handleResolveCriticalLockdown = async (task: Task, excuse: string) => {
+    const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    try {
+      const failedTask = await completeTaskAction(task.id, 'FAILED', `MISSED DEADLINE: ${excuse}`, nowStr, true);
+      setTasks(prev => prev.filter(t => t.id !== task.id));
+      setCompletedTasks(prev => [failedTask as Task, ...prev]);
+    } catch (e) {
+      console.error("Failed to resolve lockdown", e);
+    }
+    setLockedTask(null);
+  };
+
+  const handleRestoreTask = async (task: Task, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const restored = await restoreTaskAction(task.id);
+      setCompletedTasks(completedTasks.filter(t => t.id !== task.id));
+      setTasks([restored as Task, ...tasks]);
+    } catch (err) {
+      console.error("Failed to restore task", err);
+    }
+  };
+
+  const handleTriggerComplete = (task: Task, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setActiveFocusTask(null); 
+    setAccomplishmentConfig({ task, mode: 'complete' });
+  };
+
+  const openCreateModal = (rail: 'urgent' | 'exploration') => {
+    setTaskModalRail(rail);
+    setEditingTask(null);
+    setIsTaskModalOpen(true);
+  };
+
+  const openEditModal = (task: Task, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingTask(task);
+    setIsTaskModalOpen(true);
+  };
+
+  const urgentTasks = useMemo(() => tasks.filter(t => t.rail === 'urgent'), [tasks]);
+  const explorationTasks = useMemo(() => tasks.filter(t => t.rail === 'exploration'), [tasks]);
+
+  if (isLoading) {
+    return <div className="min-h-screen bg-black flex items-center justify-center text-white font-mono">Connecting to Database...</div>;
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <>
+      <header className="sticky top-0 z-30 border-b border-[#222222] bg-black/95 backdrop-blur-md px-6 py-4">
+        <div className="max-w-6xl w-full mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-neutral-900 border border-neutral-700 flex items-center justify-center relative">
+              <span className="w-2.5 h-2.5 rounded-full bg-white inline-block"></span>
+            </div>
+            <div>
+              <h1 className="text-base font-bold text-white tracking-tight leading-none font-headline">GOF</h1>
+              <p className="text-xs text-neutral-400 mt-1 font-mono">{currentDate}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-neutral-950 border border-neutral-800 text-xs font-medium">
+              <span className="w-2 h-2 rounded-full bg-white animate-pulse"></span>
+              <span className="text-white font-semibold">Optimal</span>
+              <span className="text-neutral-600">•</span>
+              <span className="text-neutral-300 font-mono tabular-nums">{currentTime}</span>
+            </div>
+            <button onClick={() => openCreateModal('urgent')} className="w-8 h-8 rounded-full bg-white text-black hover:bg-neutral-200 active:scale-95 transition-all flex items-center justify-center font-bold">
+              <Plus className="w-4 h-4 stroke-[2.5]" />
+            </button>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </header>
+
+      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8 flex flex-col gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+          
+          <section className="flex flex-col gap-4">
+            {urgentTasks.length === 0 ? (
+              <div className="p-8 rounded-2xl border border-dashed border-neutral-800/40 bg-neutral-950/60 text-center">
+                <p className="text-sm text-neutral-400">No tasks remaining</p>
+                <button onClick={() => openCreateModal('urgent')} className="mt-3 text-xs font-semibold text-white hover:underline inline-flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5" /><span>Add Task</span>
+                </button>
+              </div>
+            ) : (
+              urgentTasks.map((task) => (
+                <TaskCard key={task.id} task={task} currentTime={currentDateObj} onStart={setActiveFocusTask} onComplete={handleTriggerComplete} onEdit={openEditModal} />
+              ))
+            )}
+          </section>
+
+          <section className="flex flex-col gap-4">
+            {explorationTasks.length === 0 ? (
+              <div className="p-8 rounded-2xl border border-dashed border-neutral-800/40 bg-neutral-950/60 text-center">
+                <p className="text-sm text-neutral-400">No tasks active</p>
+                <button onClick={() => openCreateModal('exploration')} className="mt-3 text-xs font-semibold text-white hover:underline inline-flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5" /><span>Add Task</span>
+                </button>
+              </div>
+            ) : (
+              explorationTasks.map((task) => (
+                <TaskCard key={task.id} task={task} currentTime={currentDateObj} onStart={setActiveFocusTask} onComplete={handleTriggerComplete} onEdit={openEditModal} />
+              ))
+            )}
+          </section>
         </div>
+
+        <section className="mt-4 pt-6 border-t border-neutral-800/40">
+          <div className="flex items-center justify-between mb-4">
+            <button onClick={() => setIsCompletedExpanded(!isCompletedExpanded)} className="flex items-center gap-2 text-neutral-300 hover:text-white transition-colors text-sm font-semibold">
+              {isCompletedExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              <span className="text-white font-headline">Completed</span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-neutral-900/80 text-neutral-400 border border-neutral-800/50 font-mono">{completedTasks.length}</span>
+            </button>
+          </div>
+
+          {isCompletedExpanded && (
+            <div className="space-y-2.5">
+              {completedTasks.length === 0 ? (
+                <div className="py-6 px-4 rounded-2xl border border-dashed border-neutral-850/40 text-center text-xs text-neutral-500 bg-neutral-950/40">
+                  No completed tasks yet.
+                </div>
+              ) : (
+                completedTasks.map((task) => {
+                  const isFailed = task.score === 'FAILED';
+                  return (
+                    <div key={task.id} onClick={() => setAccomplishmentConfig({ task, mode: 'review' })} className={`group flex items-center justify-between p-3.5 px-4 rounded-xl hover:bg-neutral-900/80 border cursor-pointer ${isFailed ? 'bg-red-950/20 border-red-900/50' : 'bg-neutral-950/70 border-neutral-800/40'}`}>
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${isFailed ? 'bg-red-500 text-white' : 'bg-white text-black'}`}>
+                          {isFailed ? <AlertCircle className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
+                        </div>
+                        <div>
+                          <p className={`text-sm font-medium ${isFailed ? 'text-red-200' : 'text-neutral-200'}`}>{task.title}</p>
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-neutral-500">
+                            <span className="font-mono">Finished {task.completedAt}</span>
+                            {task.score && <><span className="text-neutral-600">•</span><span className={`font-mono font-bold text-xs px-1.5 py-0.5 rounded ${isFailed ? 'bg-red-500 text-white' : 'text-black bg-white'}`}>{task.score}</span></>}
+                            {task.reflection && <><span className="text-neutral-600">•</span><span className="text-neutral-400 italic truncate max-w-xs sm:max-w-md">"{task.reflection}"</span></>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button onClick={(e) => handleRestoreTask(task, e)} className="text-xs text-neutral-400 hover:text-white px-3 py-1 rounded-full border border-neutral-800/40 flex items-center gap-1.5">
+                          <RotateCcw className="w-3 h-3" /> Restore
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
+        </section>
       </main>
-    </div>
+
+      {/* OVERLAYS & MODALS */}
+      {lockedTask && (
+        <CriticalLockdownModal task={lockedTask} onSubmitExcuse={handleResolveCriticalLockdown} />
+      )}
+
+      {!lockedTask && activeFocusTask && (
+        <FocusOverlay task={activeFocusTask} onDismiss={() => setActiveFocusTask(null)} onComplete={handleTriggerComplete} />
+      )}
+
+      {!lockedTask && accomplishmentConfig && (
+        <AccomplishmentModal task={accomplishmentConfig.task} mode={accomplishmentConfig.mode} onClose={() => setAccomplishmentConfig(null)} onSave={handleSaveAccomplishment} />
+      )}
+
+      {!lockedTask && (
+        <TaskModal isOpen={isTaskModalOpen} onClose={() => { setIsTaskModalOpen(false); setEditingTask(null); }} onSave={handleSaveTask} onDelete={handleDeleteTask} initialTask={editingTask} defaultRail={taskModalRail} />
+      )}
+    </>
   );
 }

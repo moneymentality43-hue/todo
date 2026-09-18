@@ -1,26 +1,76 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* Custom Fonts */
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
+  --font-headline: var(--font-space-grotesk), sans-serif;
+
+  /* Custom 'mono' color palette from your prototype */
+  --color-mono-black: #000000;
+  --color-mono-950: #0a0a0a;
+  --color-mono-900: #121212;
+  --color-mono-850: #171717;
+  --color-mono-800: #222222;
+  --color-mono-700: #333333;
+  --color-mono-600: #525252;
+  --color-mono-500: #737373;
+  --color-mono-400: #a3a3a3;
+  --color-mono-300: #d4d4d4;
+  --color-mono-200: #e5e5e5;
+  --color-mono-100: #f5f5f5;
+  --color-mono-white: #ffffff;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* Base Body Styles */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: #000000;
+  color: #ffffff;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #000000;
+}
+::-webkit-scrollbar-thumb {
+  background: #262626;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #404040;
+}
+
+/* Remove spin buttons from number inputs */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* Importance Lights Overrides */
+polygon[style*="filter"] {
+  filter: none !important;
+}
+polygon[fill="rgba(255, 255, 255, 0.03)"] {
+  stroke: #333333 !important;
+  stroke-width: 1px !important;
+  fill: #141414 !important;
+}
+polygon[fill="#ffffff"] {
+  fill: #ffffff !important;
+  stroke: #ffffff !important;
+  filter: none !important;
 }

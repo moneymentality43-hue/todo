@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+model Task {
+  id              String   @id @default(cuid())
+  rail            String   
+  title           String
+  deadline        DateTime // Changed from String to DateTime
+  importanceLevel Int      @default(3)
+  lightColor      String   
+  microStep       String
+  
+  status          String   @default("ACTIVE") 
+  score           String?
+  reflection      String?
+  completedAt     String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
