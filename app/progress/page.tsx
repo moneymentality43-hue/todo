@@ -1,3 +1,4 @@
+// app/progress/page.tsx
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -10,7 +11,7 @@ import {
   createMetricAction, 
   updateMetricValAction, 
   deleteMetricAction,
-  deleteMilestoneAction // NEW IMPORT
+  deleteMilestoneAction
 } from '../actions';
 
 type Metric = { id: string; name: string; val: number };
@@ -101,7 +102,6 @@ export default function ProgressPage() {
       await updateMetricValAction(metricId, newVal);
     } catch (e) {
       console.error("Failed to sync metric update with database", e);
-      // Optional: You could fetch the real data here again if it failed, to revert the optimistic update
     }
   };
 
@@ -117,11 +117,10 @@ export default function ProgressPage() {
     }
   };
 
-  // NEW DELETION HANDLER FOR MILESTONES
   const handleDeleteMilestone = async (milestoneId: string) => {
     // 1. Optimistically remove it from the UI
     setTimelineData(prev => prev.filter(entry => entry.id !== milestoneId));
-    setActiveDateId(null); // Close the active panel since it was just deleted
+    setActiveDateId(null); 
 
     // 2. Sync with database
     try {
@@ -143,46 +142,48 @@ export default function ProgressPage() {
     <div className="bg-black text-white font-sans antialiased min-h-screen selection:bg-white selection:text-black">
       <AppHeader currentDate={currentDate} currentTime={currentTime} />
 
-      <main className="w-full pt-8 pb-16 min-h-[calc(100vh-4rem)]">
-        <div className="w-full max-w-5xl mx-auto px-6">
-          <div className="w-full rounded-2xl bg-[#0a0a0a] p-8 md:p-10 relative border border-[#222222] shadow-2xl">
+      <main className="w-full pt-6 md:pt-8 pb-16 min-h-[calc(100vh-4rem)]">
+        <div className="w-full max-w-5xl mx-auto px-4 md:px-6">
+          <div className="w-full rounded-2xl bg-[#0a0a0a] p-6 md:p-10 relative border border-[#222222] shadow-2xl">
             
-            {/* Header & Search */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b border-[#222222]">
+            {/* Header & Search - MOBILE RESPONSIVE */}
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-6 border-b border-[#222222]">
               <h1 className="font-headline text-2xl text-white tracking-tight font-semibold">Progress Engine</h1>
               
-              <div className="flex items-center gap-3 w-full sm:w-auto">
-                <div className="relative flex-1 sm:w-64">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+                {/* Search Bar - Full width on mobile */}
+                <div className="relative flex-1 sm:w-64 w-full">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
                   <input 
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search milestones..."
-                    className="w-full bg-[#141414] border border-[#262626] focus:border-white rounded-lg pl-9 pr-3 py-1.5 text-xs text-white placeholder-neutral-600 outline-none transition-all font-mono"
+                    className="w-full bg-[#141414] border border-[#262626] focus:border-white rounded-lg pl-9 pr-3 py-2.5 sm:py-1.5 text-xs text-white placeholder-neutral-600 outline-none transition-all font-mono"
                   />
                 </div>
 
-                <div className="relative shrink-0">
+                {/* Add Date Button - Full width on mobile */}
+                <div className="relative shrink-0 w-full sm:w-auto">
                   <button 
                     onClick={() => setIsPopoverOpen(!isPopoverOpen)}
-                    className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white font-mono text-xs transition-all border border-neutral-800"
+                    className="w-full sm:w-auto group flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white font-mono text-xs transition-all border border-neutral-800"
                   >
                     <Plus className="w-3.5 h-3.5 text-neutral-400 group-hover:text-white transition-colors" />
-                    <span className="font-semibold hidden sm:inline">Add Date</span>
+                    <span className="font-semibold">Add Date</span>
                   </button>
 
                   {isPopoverOpen && (
-                    <div className="absolute right-0 mt-2 w-56 rounded-xl bg-[#141414] border border-[#262626] p-1.5 shadow-xl z-30 backdrop-blur-sm">
+                    <div className="absolute right-0 sm:right-0 left-0 sm:left-auto mt-2 w-full sm:w-56 rounded-xl bg-[#141414] border border-[#262626] p-1.5 shadow-xl z-30 backdrop-blur-sm">
                       <div className="px-2.5 py-1 text-[10px] text-neutral-500 uppercase tracking-wider font-bold">New Milestone</div>
-                      <button onClick={() => handleAddNewDate(formattedToday)} className="w-full text-left px-2.5 py-2 rounded-lg text-xs text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors flex items-center justify-between font-mono">
+                      <button onClick={() => handleAddNewDate(formattedToday)} className="w-full text-left px-2.5 py-3 sm:py-2 rounded-lg text-xs text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors flex items-center justify-between font-mono">
                         <span>Today ({formattedToday})</span>
                         <span className="text-[10px] text-neutral-500">AUTO</span>
                       </button>
                       <button onClick={() => {
                         const input = window.prompt("Enter milestone date (MM/DD/YY):", formattedToday);
                         if (input?.trim()) handleAddNewDate(input.trim());
-                      }} className="w-full text-left px-2.5 py-2 rounded-lg text-xs text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors flex items-center justify-between font-mono">
+                      }} className="w-full text-left px-2.5 py-3 sm:py-2 rounded-lg text-xs text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors flex items-center justify-between font-mono">
                         <span>Custom Date...</span>
                         <Calendar className="w-3.5 h-3.5 text-neutral-500" />
                       </button>
@@ -195,8 +196,7 @@ export default function ProgressPage() {
             {/* Timeline Area */}
             <div className="relative pt-8 pb-8 min-h-[460px]">
               
-
-              <div className="flex flex-col gap-y-10 relative z-10 pl-6 md:pl-8">
+              <div className="flex flex-col gap-y-10 relative z-10 pl-2 sm:pl-6 md:pl-8">
                 {isLoading ? (
                   <div className="text-xs font-mono text-neutral-500">Syncing telemetry...</div>
                 ) : filteredTimeline.length === 0 ? (
@@ -213,7 +213,7 @@ export default function ProgressPage() {
                       onAddMetric={handleAddMetric}
                       onUpdateMetric={handleUpdateMetricVal}
                       onDeleteMetric={handleDeleteMetric}
-                      onDeleteMilestone={handleDeleteMilestone} // WIRED UP PROP HERE
+                      onDeleteMilestone={handleDeleteMilestone}
                     />
                   ))
                 )}
