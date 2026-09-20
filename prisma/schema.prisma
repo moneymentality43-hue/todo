@@ -7,16 +7,29 @@ datasource db {
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
+
+model User {
+  id         String      @id @default(cuid())
+  username   String      @unique
+  password   String      // Hashed password
+  tasks      Task[]
+  milestones Milestone[] // Ties progress milestones to user
+  createdAt  DateTime    @default(now())
+}
+
 model Task {
   id              String   @id @default(cuid())
+  userId          String   // Ties the task to the user
+  user            User     @relation(fields: [userId], references: [id])
+  
   rail            String   
   title           String
-  deadline        DateTime // Changed from String to DateTime
+  deadline        DateTime 
   importanceLevel Int      @default(3)
   lightColor      String   
   microStep       String
-  warningThresholdMin     Int      @default(120) // Minutes before deadline to turn red
-  notificationIntervalMin Int?     // Minutes between alerts (null = no alerts)
+  warningThresholdMin     Int      @default(120) 
+  notificationIntervalMin Int?     
   status          String   @default("ACTIVE") 
   score           String?
   reflection      String?
@@ -26,3 +39,30 @@ model Task {
   updatedAt       DateTime @updatedAt
 }
 
+// ==========================================
+// PROGRESS ENGINE MODELS
+// ==========================================
+
+model Milestone {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  
+  date       DateTime // Absolute date for chronological sorting
+  dateString String   // Display string (e.g. "9/20/26")
+  
+  metrics    Metric[] // The points tracked on this date
+  
+  createdAt  DateTime @default(now())
+}
+
+model Metric {
+  id          String    @id @default(cuid())
+  milestoneId String
+  milestone   Milestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  
+  name        String
+  val         Int
+  
+  createdAt   DateTime  @default(now())
+}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CheckCircle } from 'lucide-react';
 import { Task } from '../types';
 
@@ -9,29 +9,68 @@ interface FocusOverlayProps {
 }
 
 export default function FocusOverlay({ task, onDismiss, onComplete }: FocusOverlayProps) {
-  const [focusSeconds, setFocusSeconds] = useState(120);
-  const [isFocusRunning, setIsFocusRunning] = useState(true);
   const [focusPhase, setFocusPhase] = useState<'2min' | 'deep'>('2min');
-  const [deepSeconds, setDeepSeconds] = useState(0);
+  const [isFocusRunning, setIsFocusRunning] = useState(true);
+  
+  // UI Display states
+  const [displaySeconds, setDisplaySeconds] = useState(120);
+
+  // ABSOLUTE TIME TRACKING
+  const startTimeRef = useRef<number>(Date.now());
+  const totalPausedTimeRef = useRef<number>(0);
+  const pauseStartRef = useRef<number | null>(null);
+
+  // Handle phase switching manually (when user clicks "Enter Deep Flow")
+  const switchToDeepFlow = () => {
+    setFocusPhase('deep');
+    startTimeRef.current = Date.now(); // Reset the absolute clock for the new phase
+    totalPausedTimeRef.current = 0;
+    pauseStartRef.current = null;
+    setDisplaySeconds(0);
+  };
+
+  // Handle Pause/Resume
+  const togglePause = () => {
+    if (isFocusRunning) {
+      // We are pausing. Record exactly when we paused.
+      pauseStartRef.current = Date.now();
+    } else {
+      // We are resuming. Add the time spent paused to our total paused tally.
+      if (pauseStartRef.current) {
+        totalPausedTimeRef.current += (Date.now() - pauseStartRef.current);
+        pauseStartRef.current = null;
+      }
+    }
+    setIsFocusRunning(!isFocusRunning);
+  };
 
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (isFocusRunning) {
-      timer = setInterval(() => {
+    let animationFrameId: number;
+
+    const tick = () => {
+      if (isFocusRunning) {
+        const now = Date.now();
+        // Calculate exact elapsed time: (Now - Start) minus (Time spent paused)
+        const elapsedMs = now - startTimeRef.current - totalPausedTimeRef.current;
+        const elapsedSecs = Math.floor(elapsedMs / 1000);
+
         if (focusPhase === '2min') {
-          setFocusSeconds((prev) => {
-            if (prev <= 1) {
-              setFocusPhase('deep');
-              return 0;
-            }
-            return prev - 1;
-          });
+          const remaining = Math.max(0, 120 - elapsedSecs);
+          setDisplaySeconds(remaining);
+          
+          if (remaining === 0) {
+            switchToDeepFlow(); // Auto-switch when 2 minutes are up
+          }
         } else {
-          setDeepSeconds((prev) => prev + 1);
+          setDisplaySeconds(elapsedSecs);
         }
-      }, 1000);
-    }
-    return () => clearInterval(timer);
+      }
+      // Request next frame (runs at ~60fps while tab is active, throttles gracefully when hidden but math stays accurate!)
+      animationFrameId = requestAnimationFrame(tick);
+    };
+
+    animationFrameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animationFrameId);
   }, [isFocusRunning, focusPhase]);
 
   return (
@@ -56,16 +95,13 @@ export default function FocusOverlay({ task, onDismiss, onComplete }: FocusOverl
             <circle 
               cx="50" cy="50" r="44" className="text-white" strokeWidth="3.5" strokeLinecap="round" 
               strokeDasharray={276.46} 
-              strokeDashoffset={focusPhase === '2min' ? 276.46 - (focusSeconds / 120) * 276.46 : 0} 
+              strokeDashoffset={focusPhase === '2min' ? 276.46 - (displaySeconds / 120) * 276.46 : 0} 
               stroke="currentColor" fill="transparent" 
             />
           </svg>
           <div className="absolute flex flex-col items-center">
             <span className="text-4xl font-bold text-white tracking-tight tabular-nums font-headline">
-              {focusPhase === '2min' 
-                ? `${Math.floor(focusSeconds / 60)}:${String(focusSeconds % 60).padStart(2, '0')}`
-                : `${Math.floor(deepSeconds / 60)}:${String(deepSeconds % 60).padStart(2, '0')}`
-              }
+              {`${Math.floor(displaySeconds / 60)}:${String(displaySeconds % 60).padStart(2, '0')}`}
             </span>
             <span className="text-xs text-neutral-400 mt-1 font-mono">
               {focusPhase === '2min' ? 'Initial step' : 'Elapsed'}
@@ -82,15 +118,14 @@ export default function FocusOverlay({ task, onDismiss, onComplete }: FocusOverl
       
       <div className="w-full max-w-sm flex items-center justify-center gap-3">
         {focusPhase === '2min' ? (
-          <button onClick={() => setFocusPhase('deep')} className="px-5 py-2.5 rounded-full border border-neutral-700 hover:border-white text-white text-xs font-medium transition-all font-mono">
+          <button onClick={switchToDeepFlow} className="px-5 py-2.5 rounded-full border border-neutral-700 hover:border-white text-white text-xs font-medium transition-all font-mono">
             Enter Deep Flow
           </button>
         ) : (
-          <button onClick={() => setIsFocusRunning(!isFocusRunning)} className="px-5 py-2.5 rounded-full border border-neutral-700 hover:border-white text-white text-xs font-medium transition-all font-mono">
+          <button onClick={togglePause} className="px-5 py-2.5 rounded-full border border-neutral-700 hover:border-white text-white text-xs font-medium transition-all font-mono">
             {isFocusRunning ? 'Pause' : 'Resume'}
           </button>
         )}
-        {/* THIS FIXES THE BUG: We call onComplete which will unmount this overlay instantly */ }
         <button onClick={() => onComplete(task)} className="px-5 py-2.5 rounded-full bg-white text-black hover:bg-neutral-200 active:scale-95 font-semibold text-xs flex items-center gap-1.5 transition-all">
           <CheckCircle className="w-4 h-4 text-black" /><span>Mark Finished</span>
         </button>
