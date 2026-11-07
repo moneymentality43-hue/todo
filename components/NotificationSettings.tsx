@@ -42,6 +42,8 @@ export default function NotificationSettings() {
   const [quietEnd, setQuietEnd] = useState('07:00');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [diag, setDiag] = useState<string[]>([]);
+  const [syncCount, setSyncCount] = useState(0);
 
   const applyState = useCallback((s: NotificationState) => {
     setState(s);
@@ -54,26 +56,49 @@ export default function NotificationSettings() {
 
   const loadState = useCallback(async () => applyState(await getNotificationState()), [applyState]);
 
-  // Registers the service worker and reports what this browser supports / has subscribed
+  // Registers the service worker and reports what this browser supports / has subscribed.
+  // Every step is recorded in `diag` so problems are visible in the panel instead of swallowed.
   useEffect(() => {
     const detect = async () => {
+      const lines: string[] = [];
+      lines.push(`secure context: ${window.isSecureContext}`);
+      lines.push(`serviceWorker: ${'serviceWorker' in navigator}, PushManager: ${'PushManager' in window}, Notification: ${'Notification' in window}`);
+      lines.push(`VAPID public key in client bundle: ${VAPID_PUBLIC_KEY ? `yes (${VAPID_PUBLIC_KEY.length} chars)` : 'NO - restart the dev server / redeploy'}`);
       const ok = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
-      if (!ok) return { supported: false, permission: 'default' as NotificationPermission, subscribed: false };
+      if (!ok) return { supported: false, permission: 'default' as NotificationPermission, subscribed: false, synced: false, lines };
+
+      lines.push(`permission: ${Notification.permission}`);
+      let subscribed = false;
+      let synced = false;
       try {
         const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' });
         await navigator.serviceWorker.ready;
+        lines.push(`service worker active, scope ${reg.scope}`);
         const sub = await reg.pushManager.getSubscription();
-        // Keep the server copy fresh in case the browser rotated the subscription
+        subscribed = Boolean(sub);
+        lines.push(sub ? `browser subscription: yes (${new URL(sub.endpoint).host})` : 'browser subscription: none');
+
+        // Keep the server copy fresh (also repairs a subscription the server lost)
         if (sub && Notification.permission === 'granted') {
           const json = sub.toJSON();
           if (json.endpoint && json.keys?.p256dh && json.keys?.auth) {
-            void subscribePush({ endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth } }, navigator.userAgent);
+            try {
+              const res = await subscribePush({ endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth } }, navigator.userAgent);
+              synced = res.ok;
+              lines.push(res.ok ? 'server sync: ok' : `server sync FAILED: ${res.error}`);
+            } catch (e) {
+              console.error('[notifications] server sync failed', e);
+              lines.push(`server sync FAILED: ${(e as Error).message}`);
+            }
+          } else {
+            lines.push('browser subscription is missing keys');
           }
         }
-        return { supported: true, permission: Notification.permission, subscribed: Boolean(sub) };
-      } catch {
-        return { supported: false, permission: Notification.permission, subscribed: false };
+      } catch (e) {
+        console.error('[notifications] setup failed', e);
+        lines.push(`setup FAILED: ${(e as Error).name}: ${(e as Error).message}`);
       }
+      return { supported: true, permission: Notification.permission, subscribed, synced, lines };
     };
 
     let cancelled = false;
@@ -82,6 +107,8 @@ export default function NotificationSettings() {
       setSupported(r.supported);
       setPermission(r.permission);
       setDeviceSubscribed(r.subscribed);
+      setDiag(r.lines);
+      if (r.synced) setSyncCount((n) => n + 1);
     });
     return () => {
       cancelled = true;
@@ -91,19 +118,24 @@ export default function NotificationSettings() {
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void getNotificationState().then((s) => {
-      if (!cancelled) applyState(s);
-    });
+    getNotificationState()
+      .then((s) => {
+        if (!cancelled) applyState(s);
+      })
+      .catch((e) => {
+        console.error('[notifications] could not load state', e);
+        if (!cancelled) setMessage(`Could not load settings: ${(e as Error).message}`);
+      });
     return () => {
       cancelled = true;
     };
-  }, [open, applyState]);
+  }, [open, syncCount, applyState]);
 
   const enableDevice = async () => {
     setBusy(true);
     setMessage('');
     try {
-      if (!VAPID_PUBLIC_KEY) throw new Error('Push is not configured on the server.');
+      if (!VAPID_PUBLIC_KEY) throw new Error('Push is not configured: the public key is missing from the client bundle. Restart the dev server or redeploy.');
       const result = await Notification.requestPermission();
       setPermission(result);
       if (result !== 'granted') throw new Error('Permission was not granted. Allow notifications in your browser settings.');
@@ -125,7 +157,13 @@ export default function NotificationSettings() {
       await loadState();
       setMessage('This device will now receive notifications.');
     } catch (e) {
-      setMessage((e as Error).message || 'Could not enable notifications.');
+      console.error('[notifications] enable failed', e);
+      const err = e as Error;
+      setMessage(
+        err.name === 'AbortError'
+          ? 'The browser could not reach its push service (AbortError). Brave needs "Use Google services for push messaging" turned on; some networks/VPNs also block it.'
+          : `${err.name !== 'Error' ? `${err.name}: ` : ''}${err.message || 'Could not enable notifications.'}`
+      );
     } finally {
       setBusy(false);
     }
@@ -273,7 +311,7 @@ export default function NotificationSettings() {
                       <button disabled={busy} onClick={save} className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-white text-black hover:bg-neutral-200 disabled:opacity-50">
                         Save
                       </button>
-                      <button disabled={busy} onClick={sendTest} className="flex-1 text-xs px-3 py-2 rounded-lg border border-neutral-700 text-neutral-300 hover:border-white hover:text-white disabled:opacity-50">
+                      <button disabled={busy || !deviceSubscribed} onClick={sendTest} title={deviceSubscribed ? undefined : 'Enable notifications on this device first'} className="flex-1 text-xs px-3 py-2 rounded-lg border border-neutral-700 text-neutral-300 hover:border-white hover:text-white disabled:opacity-50">
                         Send test
                       </button>
                     </div>
@@ -283,6 +321,16 @@ export default function NotificationSettings() {
             )}
 
             {message && <p role="status" className="text-xs text-neutral-300">{message}</p>}
+
+            <details className="text-[11px] text-neutral-500">
+              <summary className="cursor-pointer hover:text-neutral-300">Diagnostics</summary>
+              <ul className="mt-2 space-y-1 font-mono break-words">
+                {diag.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+                {state && <li>server: {state.deviceCount} device(s) saved for your account</li>}
+              </ul>
+            </details>
           </div>
         </div>
       )}
