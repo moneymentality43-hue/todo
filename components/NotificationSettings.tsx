@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Bell, X } from 'lucide-react';
 import {
   getNotificationState,
@@ -235,7 +236,8 @@ export default function NotificationSettings() {
         {deviceSubscribed && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-white" />}
       </button>
 
-      {open && (
+      {/* Rendered in a portal: the header's backdrop-blur would otherwise become the containing block of this fixed overlay */}
+      {open && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setOpen(false)}>
           <div
             className="w-full max-w-md bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-5 max-h-[90vh] overflow-y-auto"
@@ -332,7 +334,8 @@ export default function NotificationSettings() {
               </ul>
             </details>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
