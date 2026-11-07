@@ -19,7 +19,7 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "GOF - Task Manager",
+  title: "FY - Task Manager",
   description: "High-Contrast Monochromatic Interface",
 };
 

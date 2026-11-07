@@ -26,7 +26,8 @@ export async function middleware(req: NextRequest) {
   return NextResponse.next();
 }
 
-// Ensure middleware only runs on routes, not static files/images/api
+// Ensure middleware only runs on routes, not static files/images/api or the PWA/push assets
+// (the service worker and manifest must be reachable without a session)
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|sounds|favicon.ico).*)'],
+  matcher: ['/((?!api|_next/static|_next/image|sounds|favicon.ico|sw\\.js|manifest\\.webmanifest|icon-192\\.png|icon-512\\.png|badge\\.png).*)'],
 };

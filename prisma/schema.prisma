@@ -15,6 +15,10 @@ model User {
   tasks      Task[]
   milestones Milestone[] // Ties progress milestones to user
   createdAt  DateTime    @default(now())
+
+  pushSubscriptions    PushSubscription[]
+  notificationSettings NotificationSettings?
+  notificationLogs     NotificationLog[]
 }
 
 model Task {
@@ -66,3 +70,64 @@ model Metric {
   
   createdAt   DateTime  @default(now())
 }
+
+// ==========================================
+// NOTIFICATION SYSTEM MODELS
+// ==========================================
+
+// One row per browser/device that opted in to push
+model PushSubscription {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  endpoint      String    @unique
+  p256dh        String
+  auth          String
+  userAgent     String?
+
+  createdAt     DateTime  @default(now())
+  lastSuccessAt DateTime?
+
+  @@index([userId])
+}
+
+model NotificationSettings {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  enabled    Boolean  @default(true)
+  timezone   String   @default("UTC")  // IANA name, e.g. "Asia/Kolkata"
+  quietStart Int?     // minutes from midnight in `timezone`; null = no quiet hours
+  quietEnd   Int?
+  typePrefs  Json     @default("{}")   // { [type]: boolean } overrides of the registry defaults
+
+  updatedAt  DateTime @updatedAt
+}
+
+// Outbox + idempotency record. dedupeKey is unique so a notification is never sent twice.
+model NotificationLog {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type      String
+  dedupeKey String    @unique
+  title     String
+  body      String
+  url       String?
+  data      Json?
+
+  status    String    @default("PENDING") // PENDING | SENT | SKIPPED | FAILED
+  attempts  Int       @default(0)
+  error     String?
+  sendAfter DateTime  @default(now())
+  expiresAt DateTime? // after this a pending notification is dropped instead of sent late
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([status, sendAfter])
+  @@index([userId])
+}
+

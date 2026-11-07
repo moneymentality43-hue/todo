@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { logoutAction } from '../app/actions';
+import NotificationSettings from './NotificationSettings';
 
 interface AppHeaderProps {
   currentDate: string;
@@ -30,7 +31,7 @@ export default function AppHeader({ currentDate, currentTime, onOpenCreateModal 
             <span className="w-2.5 h-2.5 rounded-full bg-white inline-block"></span>
           </div>
           <div>
-            <h1 className="text-base font-bold text-white tracking-tight leading-none font-headline">GOF</h1>
+            <h1 className="text-base font-bold text-white tracking-tight leading-none font-headline">FY</h1>
             <p className="text-xs text-neutral-400 mt-1 font-mono hidden sm:block">{currentDate}</p>
           </div>
         </div>
@@ -64,6 +65,8 @@ export default function AppHeader({ currentDate, currentTime, onOpenCreateModal 
               <Plus className="w-4 h-4 stroke-[2.5]" />
             </button>
           )}
+
+          <NotificationSettings />
 
           <button onClick={handleLogout} className="w-8 h-8 rounded-full border border-neutral-700 hover:border-white text-neutral-400 hover:text-white transition-all flex items-center justify-center font-bold text-[10px] sm:text-xs">
             Esc
