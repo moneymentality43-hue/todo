@@ -2,8 +2,9 @@
 
 import React, { useState } from 'react';
 import { createGoalTask } from '../../app/goals/actions';
-import type { GoalTaskDTO, MetricType } from '../../types/goals';
+import type { GoalTaskDTO, MetricType, WorkType } from '../../types/goals';
 import MetricTypePicker from './MetricTypePicker';
+import WorkTypeToggle from './WorkTypeToggle';
 
 interface CreateTaskFormProps {
   goalId?: string | null;
@@ -22,6 +23,8 @@ export default function CreateTaskForm({ goalId, onCreated, onCancel }: CreateTa
   const [minutes, setMinutes] = useState('');
   const [unit, setUnit] = useState('');
   const [start, setStart] = useState('');
+  const [workType, setWorkType] = useState<WorkType>('SHALLOW');
+  const [timeHours, setTimeHours] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -33,6 +36,9 @@ export default function CreateTaskForm({ goalId, onCreated, onCancel }: CreateTa
     setError(null);
 
     if (!title.trim()) return setError('Give the task a name.');
+
+    const timeValue = Number(timeHours) || 0;
+    if (timeValue < 0) return setError('Time spent must be 0 or more.');
 
     let targetValue: number | undefined;
     if (metricType === 'DURATION') {
@@ -53,6 +59,8 @@ export default function CreateTaskForm({ goalId, onCreated, onCancel }: CreateTa
         unit: metricType === 'CUSTOM' ? unit : undefined,
         start: start ? Number(start) : 0,
         goalId: goalId ?? null,
+        workType,
+        timeSpentMin: Math.round(timeValue * 60),
       });
       if (res.ok === false) {
         setError(res.error);
@@ -114,6 +122,18 @@ export default function CreateTaskForm({ goalId, onCreated, onCancel }: CreateTa
           <input id="gt-start" type="number" min={0} inputMode="decimal" value={start} onChange={e => setStart(e.target.value)} placeholder="0" className={inputCls} />
         </div>
       )}
+
+      <div>
+        <span className={labelCls}>Work type</span>
+        <WorkTypeToggle value={workType} onChange={setWorkType} />
+      </div>
+
+      <div>
+        <label className={labelCls} htmlFor="gt-time">
+          Time spent so far <span className="normal-case text-neutral-600">(optional, in hours)</span>
+        </label>
+        <input id="gt-time" type="number" min={0} step="0.25" inputMode="decimal" value={timeHours} onChange={e => setTimeHours(e.target.value)} placeholder="0" className={inputCls} />
+      </div>
 
       {error && <p role="alert" className="text-xs text-neutral-300 border border-neutral-700 rounded-lg px-3 py-2 bg-neutral-900">{error}</p>}
 

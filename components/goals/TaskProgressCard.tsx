@@ -11,6 +11,7 @@ import {
 import { currentStreak, dailySeries, todayTotal } from '../../lib/goals/streak';
 import { METRIC_ICON } from './MetricTypePicker';
 import Sparkline from './Sparkline';
+import TaskTimeRow from './TaskTimeRow';
 
 interface TaskProgressCardProps {
   task: GoalTaskDTO;
@@ -405,6 +406,8 @@ export default function TaskProgressCard({ task, showGoalChip = true, onOpenGoal
           </div>
         </div>
       )}
+
+      {!editing && !confirmDelete && <TaskTimeRow task={task} />}
 
       {!editing && !confirmDelete && (
         <div className="mt-4 pt-3 border-t border-[#1a1a1a] flex items-center justify-between gap-3">

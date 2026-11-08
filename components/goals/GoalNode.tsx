@@ -6,12 +6,15 @@ import { GitBranch, ListChecks } from 'lucide-react';
 import type { GoalStatus, MetricType } from '../../types/goals';
 import { formatTarget, formatValue, progressRatio } from '../../lib/goals/metrics';
 import StatusBadge from './StatusBadge';
+import WorkTimeBadge from './WorkTimeBadge';
 
 export type GoalNodeData = {
   name: string;
   status: GoalStatus;
   subGoalCount: number;
   taskCount: number;
+  deepMinutes: number;
+  shallowMinutes: number;
   isRoot: boolean;
 };
 export type GoalFlowNode = Node<GoalNodeData, 'goal'>;
@@ -43,6 +46,7 @@ export function GoalNode({ data }: NodeProps<GoalFlowNode>) {
         <span className="flex items-center gap-1"><GitBranch className="w-3 h-3" /> {data.subGoalCount}</span>
         <span className="flex items-center gap-1"><ListChecks className="w-3 h-3" /> {data.taskCount}</span>
       </div>
+      <WorkTimeBadge deepMinutes={data.deepMinutes} shallowMinutes={data.shallowMinutes} compact className="mt-2" />
       <Handle type="source" position={Position.Bottom} className={hidden} />
     </div>
   );

@@ -6,6 +6,7 @@ import { getSession } from '../../lib/auth';
 import {
   GOAL_STATUSES,
   METRIC_TYPES,
+  WORK_TYPES,
   LIMITS,
   type ActionResult,
   type AdjustTaskInput,
@@ -20,10 +21,14 @@ import {
   type GoalTree,
   type GraphGoalNode,
   type GraphTaskNode,
+  type LogTimeInput,
   type MetricType,
   type TaskLogDTO,
   type UpdateGoalTaskInput,
+  type WorkTime,
+  type WorkType,
 } from '../../types/goals';
+import { EMPTY_TIME, rollupTime } from '../../lib/goals/time';
 
 // ==========================================
 // HELPERS
@@ -57,6 +62,10 @@ function isMetricType(v: unknown): v is MetricType {
   return typeof v === 'string' && (METRIC_TYPES as readonly string[]).includes(v);
 }
 
+function isWorkType(v: unknown): v is WorkType {
+  return typeof v === 'string' && (WORK_TYPES as readonly string[]).includes(v);
+}
+
 // parentName is resolved by the caller (usually from data it already has) to avoid an extra relation query
 const summarySelect = {
   id: true,
@@ -68,7 +77,7 @@ const summarySelect = {
 
 type SummaryRow = Prisma.GoalGetPayload<{ select: typeof summarySelect }>;
 
-function toSummary(r: SummaryRow, parentName: string | null = null): GoalSummary {
+function toSummary(r: SummaryRow, parentName: string | null = null, time: WorkTime = EMPTY_TIME): GoalSummary {
   return {
     id: r.id,
     name: r.name,
@@ -77,12 +86,14 @@ function toSummary(r: SummaryRow, parentName: string | null = null): GoalSummary
     parentName,
     subGoalCount: r._count.children,
     taskCount: r._count.tasks,
+    deepMinutes: time.deepMinutes,
+    shallowMinutes: time.shallowMinutes,
   };
 }
 
-function toSummaries(rows: SummaryRow[]): GoalSummary[] {
+function toSummaries(rows: SummaryRow[], totals: Map<string, WorkTime>): GoalSummary[] {
   const names = new Map(rows.map(r => [r.id, r.name]));
-  return rows.map(r => toSummary(r, r.parentId ? names.get(r.parentId) ?? null : null));
+  return rows.map(r => toSummary(r, r.parentId ? names.get(r.parentId) ?? null : null, totals.get(r.id)));
 }
 
 type TaskRow = Prisma.GoalTaskGetPayload<{ include: { goal: { select: { name: true } } } }>;
@@ -96,6 +107,8 @@ function toTaskDTO(t: TaskRow): GoalTaskDTO {
     unit: t.unit,
     target: t.target,
     current: t.current,
+    workType: t.workType === 'DEEP' ? 'DEEP' : 'SHALLOW',
+    timeSpentMin: t.timeSpentMin,
     goalId: t.goalId,
     goalName: t.goal?.name ?? null,
     createdAt: t.createdAt.toISOString(),
@@ -143,13 +156,38 @@ const lockTask = async (tx: Prisma.TransactionClient, id: string, userId: string
 // Generous limits: the database sits behind a remote pooler, and row-locked transactions queue
 const TX_OPTIONS = { maxWait: 10_000, timeout: 30_000 };
 
+// Deep/shallow minutes per goal including all descendants. One aggregate query plus the goal tree.
+async function loadTimeTotals(db: Db, userId: string): Promise<Map<string, WorkTime>> {
+  const [sums, goals] = await Promise.all([
+    db.goalTask.groupBy({
+      by: ['goalId', 'workType'],
+      where: { userId, goalId: { not: null } },
+      _sum: { timeSpentMin: true },
+    }),
+    db.goal.findMany({ where: { userId }, select: { id: true, parentId: true } }),
+  ]);
+  const own = new Map<string, WorkTime>();
+  for (const s of sums) {
+    if (!s.goalId) continue;
+    const t = own.get(s.goalId) ?? { deepMinutes: 0, shallowMinutes: 0 };
+    const minutes = s._sum.timeSpentMin ?? 0;
+    if (s.workType === 'DEEP') t.deepMinutes += minutes;
+    else t.shallowMinutes += minutes;
+    own.set(s.goalId, t);
+  }
+  return rollupTime(goals, own);
+}
+
 async function getSummaryById(db: Db, userId: string, id: string): Promise<GoalSummary | null> {
-  const row = await db.goal.findFirst({ where: { id, userId }, select: summarySelect });
+  const [row, totals] = await Promise.all([
+    db.goal.findFirst({ where: { id, userId }, select: summarySelect }),
+    loadTimeTotals(db, userId),
+  ]);
   if (!row) return null;
   const parent = row.parentId
     ? await db.goal.findFirst({ where: { id: row.parentId, userId }, select: { name: true } })
     : null;
-  return toSummary(row, parent?.name ?? null);
+  return toSummary(row, parent?.name ?? null, totals.get(id));
 }
 
 async function loadParentMap(db: Db, userId: string) {
@@ -219,8 +257,13 @@ function clampValue(metricType: MetricType, value: number): number {
 // GOALS
 // ==========================================
 
-const loadGoalSummaries = async (userId: string) =>
-  toSummaries(await prisma.goal.findMany({ where: { userId }, select: summarySelect, orderBy: { createdAt: 'desc' } }));
+const loadGoalSummaries = async (userId: string) => {
+  const [rows, totals] = await Promise.all([
+    prisma.goal.findMany({ where: { userId }, select: summarySelect, orderBy: { createdAt: 'desc' } }),
+    loadTimeTotals(prisma, userId),
+  ]);
+  return toSummaries(rows, totals);
+};
 
 async function loadTaskDTOs(userId: string): Promise<GoalTaskDTO[]> {
   // Goal names come from a parallel query instead of a relation include (one round trip instead of two)
@@ -248,23 +291,27 @@ export async function getGoal(id: string): Promise<GoalDetail | null> {
   const userId = await requireAuth();
 
   // Independent queries run in parallel: against a remote database latency, not work, is the cost
-  const [goal, plans, children, tasks, map] = await Promise.all([
+  const [goal, plans, children, tasks, map, totals] = await Promise.all([
     prisma.goal.findFirst({ where: { id, userId }, select: { id: true, name: true, status: true, parentId: true } }),
     prisma.goalPlan.findMany({ where: { goalId: id, goal: { userId } }, orderBy: { updatedAt: 'desc' } }),
     prisma.goal.findMany({ where: { parentId: id, userId }, orderBy: { createdAt: 'asc' }, select: summarySelect }),
     prisma.goalTask.findMany({ where: { goalId: id, userId }, orderBy: { createdAt: 'asc' } }),
     loadParentMap(prisma, userId),
+    loadTimeTotals(prisma, userId),
   ]);
   if (!goal) return null;
 
+  const time = totals.get(goal.id) ?? EMPTY_TIME;
   return {
     id: goal.id,
     name: goal.name,
     status: goal.status as GoalStatus,
     parentId: goal.parentId,
+    deepMinutes: time.deepMinutes,
+    shallowMinutes: time.shallowMinutes,
     ancestors: collectAncestors(map, goal.parentId),
     plans: plans.map(toPlanDTO),
-    children: children.map(c => toSummary(c, goal.name)),
+    children: children.map(c => toSummary(c, goal.name, totals.get(c.id))),
     tasks: tasks.map(t => toTaskDTO({ ...t, goal: { name: goal.name } })),
   };
 }
@@ -444,6 +491,14 @@ export async function createGoalTask(input: CreateGoalTaskInput): Promise<Action
   }
   const start = clampValue(input.metricType, startRaw);
 
+  const workType = input.workType ?? 'SHALLOW';
+  if (!isWorkType(workType)) return fail('Invalid work type.');
+
+  const timeRaw = input.timeSpentMin ?? 0;
+  if (typeof timeRaw !== 'number' || !Number.isFinite(timeRaw) || timeRaw < 0 || timeRaw > LIMITS.maxTimeMin) {
+    return fail('Time spent must be 0 or more.');
+  }
+
   if (input.goalId) {
     const goal = await prisma.goal.findFirst({ where: { id: input.goalId, userId }, select: { id: true } });
     if (!goal) return fail('Goal not found.');
@@ -458,6 +513,8 @@ export async function createGoalTask(input: CreateGoalTaskInput): Promise<Action
       unit: shape.unit,
       target: shape.target,
       current: start,
+      workType,
+      timeSpentMin: Math.round(timeRaw),
     },
     include: taskInclude,
   });
@@ -471,7 +528,12 @@ export async function updateGoalTask(id: string, input: UpdateGoalTaskInput): Pr
   const existing = await prisma.goalTask.findFirst({ where: { id, userId } });
   if (!existing) return fail('Task not found.');
 
-  const data: { title?: string; target?: number; unit?: string | null } = {};
+  const data: { title?: string; target?: number; unit?: string | null; workType?: WorkType } = {};
+
+  if (input.workType !== undefined) {
+    if (!isWorkType(input.workType)) return fail('Invalid work type.');
+    data.workType = input.workType;
+  }
 
   if (input.title !== undefined) {
     const title = cleanText(input.title, LIMITS.taskTitle);
@@ -521,6 +583,28 @@ export async function adjustTaskValue(
     const updated = await tx.goalTask.update({ where: { id }, data: { current: next } });
 
     return ok({ task: rawToDTO({ ...row, ...updated }), log: toLogDTO(log) });
+  }, TX_OPTIONS);
+}
+
+// Time spent is a plain counter; it never touches the progress value or its history
+export async function logTaskTime(id: string, input: LogTimeInput): Promise<ActionResult<GoalTaskDTO>> {
+  const userId = await requireAuth();
+
+  const amount = 'setMin' in input ? input.setMin : input.deltaMin;
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || Math.abs(amount) > LIMITS.maxTimeMin) {
+    return fail('Invalid time.');
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const row = await lockTask(tx, id, userId);
+    if (!row) return fail('Task not found.');
+
+    const raw = 'setMin' in input ? input.setMin : row.timeSpentMin + input.deltaMin;
+    const next = Math.min(LIMITS.maxTimeMin, Math.max(0, Math.round(raw)));
+    if (next === row.timeSpentMin) return ok(rawToDTO(row));
+
+    const updated = await tx.goalTask.update({ where: { id }, data: { timeSpentMin: next } });
+    return ok(rawToDTO({ ...row, ...updated }));
   }, TX_OPTIONS);
 }
 
@@ -624,6 +708,7 @@ export async function getGoalTree(rootId: string, depth: 1 | 2, includeTasks: bo
       _count: { select: { children: true, tasks: true } },
     },
   });
+  const totals = await loadTimeTotals(prisma, userId);
 
   const byId = new Map(goals.map(g => [g.id, g]));
   const childrenOf = new Map<string, typeof goals>();
@@ -656,6 +741,8 @@ export async function getGoalTree(rootId: string, depth: 1 | 2, includeTasks: bo
       level,
       subGoalCount: g._count.children,
       taskCount: g._count.tasks,
+      deepMinutes: totals.get(g.id)?.deepMinutes ?? 0,
+      shallowMinutes: totals.get(g.id)?.shallowMinutes ?? 0,
     });
 
     if (level < maxLevel) {

@@ -26,6 +26,7 @@ function buildFlow(tree: GoalTree): { nodes: Node[]; edges: Edge[] } {
     if (n.kind === 'goal') {
       const data: GoalNodeData = {
         name: n.name, status: n.status, subGoalCount: n.subGoalCount, taskCount: n.taskCount, isRoot: n.id === tree.rootId,
+        deepMinutes: n.deepMinutes, shallowMinutes: n.shallowMinutes,
       };
       return { id: n.id, type: 'goal', position, data };
     }

@@ -6,6 +6,7 @@ import { getGoal, renameGoal, setGoalStatus, deleteGoal } from '../../app/goals/
 import { useGoals } from '../../app/goals/GoalsProvider';
 import type { GoalDetail, GoalPlanDTO, GoalStatus } from '../../types/goals';
 import StatusSelect from './StatusSelect';
+import WorkTimeBadge from './WorkTimeBadge';
 import PlansSection from './dialog/PlansSection';
 import PlanEditor from './dialog/PlanEditor';
 import SubGoalsSection from './dialog/SubGoalsSection';
@@ -221,6 +222,9 @@ function DialogBody({ goalId }: { goalId: string }) {
                 </div>
               </div>
             </div>
+          )}
+          {detail && (
+            <WorkTimeBadge deepMinutes={detail.deepMinutes} shallowMinutes={detail.shallowMinutes} className="mt-2" />
           )}
         </div>
 

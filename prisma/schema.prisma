@@ -130,7 +130,10 @@ model GoalTask {
   target     Float         // PERCENT = 100, YESNO = 1, DURATION in minutes
   current    Float         @default(0)
 
-  logs       GoalTaskLog[]
+  workType     String      @default("SHALLOW") // DEEP | SHALLOW
+  timeSpentMin Int         @default(0)         // manually logged, independent of the progress metric
+
+  logs        GoalTaskLog[]
 
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt

@@ -6,6 +6,7 @@ import { createGoal } from '../../app/goals/actions';
 import { useGoals } from '../../app/goals/GoalsProvider';
 import { GOAL_STATUSES, type GoalStatus } from '../../types/goals';
 import StatusBadge, { STATUS_LABEL } from './StatusBadge';
+import WorkTimeBadge from './WorkTimeBadge';
 
 type Filter = 'ALL' | GoalStatus;
 
@@ -129,6 +130,7 @@ export default function GoalsTab() {
                     <span className="flex items-center gap-1.5"><GitBranch className="w-3.5 h-3.5" /> {g.subGoalCount} sub-goal{g.subGoalCount === 1 ? '' : 's'}</span>
                     <span className="flex items-center gap-1.5"><ListChecks className="w-3.5 h-3.5" /> {g.taskCount} task{g.taskCount === 1 ? '' : 's'}</span>
                   </div>
+                  <WorkTimeBadge deepMinutes={g.deepMinutes} shallowMinutes={g.shallowMinutes} className="mt-2" />
                 </button>
               </li>
             ))}

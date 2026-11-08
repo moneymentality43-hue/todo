@@ -6,6 +6,7 @@ import { createGoal, attachSubGoal, detachSubGoal } from '../../../app/goals/act
 import { useGoals } from '../../../app/goals/GoalsProvider';
 import type { GoalDetail } from '../../../types/goals';
 import StatusBadge from '../StatusBadge';
+import WorkTimeBadge from '../WorkTimeBadge';
 import GoalPicker from '../GoalPicker';
 
 interface SubGoalsSectionProps {
@@ -116,6 +117,7 @@ export default function SubGoalsSection({ detail }: SubGoalsSectionProps) {
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-white truncate">{c.name}</span>
                   <span className="block text-[10px] font-mono text-neutral-500 mt-0.5">{c.subGoalCount} sub-goals · {c.taskCount} tasks</span>
+                  <WorkTimeBadge deepMinutes={c.deepMinutes} shallowMinutes={c.shallowMinutes} compact className="mt-1" />
                 </span>
                 <span className="flex items-center gap-2 shrink-0">
                   <StatusBadge status={c.status} />
