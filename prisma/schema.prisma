@@ -19,6 +19,9 @@ model User {
   pushSubscriptions    PushSubscription[]
   notificationSettings NotificationSettings?
   notificationLogs     NotificationLog[]
+
+  goals                Goal[]
+  goalTasks            GoalTask[]
 }
 
 model Task {
@@ -69,6 +72,85 @@ model Metric {
   val         Int
   
   createdAt   DateTime  @default(now())
+}
+
+// ==========================================
+// GOAL MANAGEMENT MODELS
+// ==========================================
+
+// Goals form a strict tree: deleting a goal orphans its sub-goals (parentId -> null)
+model Goal {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  status    String     @default("IN_PROGRESS") // IN_PROGRESS | PAUSED | COMPLETED
+
+  parentId  String?
+  parent    Goal?      @relation("GoalTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Goal[]     @relation("GoalTree")
+
+  plans     GoalPlan[]
+  tasks     GoalTask[]
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([userId])
+  @@index([parentId])
+}
+
+model GoalPlan {
+  id        String   @id @default(cuid())
+  goalId    String
+  goal      Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  title     String
+  body      String   @default("") @db.Text // markdown
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([goalId])
+}
+
+// A task has at most one parent goal; deleting the goal just unattaches the task
+model GoalTask {
+  id         String        @id @default(cuid())
+  userId     String
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  goalId     String?
+  goal       Goal?         @relation(fields: [goalId], references: [id], onDelete: SetNull)
+
+  title      String
+  metricType String        // COUNT | PERCENT | DURATION | YESNO | CUSTOM
+  unit       String?       // label for CUSTOM metrics
+  target     Float         // PERCENT = 100, YESNO = 1, DURATION in minutes
+  current    Float         @default(0)
+
+  logs       GoalTaskLog[]
+
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([goalId])
+}
+
+// Every value change, used for undo, sparkline and streaks
+model GoalTaskLog {
+  id          String   @id @default(cuid())
+  goalTaskId  String
+  goalTask    GoalTask @relation(fields: [goalTaskId], references: [id], onDelete: Cascade)
+
+  delta       Float
+  valueAfter  Float
+
+  createdAt   DateTime @default(now())
+
+  @@index([goalTaskId, createdAt])
 }
 
 // ==========================================

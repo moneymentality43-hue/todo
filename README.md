@@ -42,6 +42,20 @@ await notify({
 Notes: push needs HTTPS (localhost is allowed). Regenerating the VAPID keys invalidates existing subscriptions.
 `node scripts/generate-icons.mjs` regenerates the PWA/notification icons in `public/`.
 
+## Goals
+
+The **Goals** tab (`/goals`) has three views: **Goals**, **Tasks** and **Graph**. A goal opens in a shared dialog with its plans (markdown, autosaved), sub-goals and tasks.
+
+| Rule | Behaviour |
+| --- | --- |
+| Sub-goals | A strict tree: a goal has at most one parent. Detach it first to attach it elsewhere; cycles are rejected. |
+| Tasks | A goal task has one metric (count, percentage, duration, yes/no or custom unit) and belongs to at most one goal. Detach keeps it; delete removes it and its history. |
+| Deleting a goal | Its sub-goals become top-level, its tasks become unattached, and its plans are deleted. |
+| Status | `In progress`, `Paused` or `Completed`, set freely. |
+
+Code lives in `app/goals/` (server actions in `actions.ts`), `components/goals/`, `lib/goals/` and `types/goals.ts`. The models (`Goal`, `GoalPlan`, `GoalTask`, `GoalTaskLog`) are additive: run `npx prisma db push` to create them.
+The graph uses [React Flow](https://reactflow.dev) (`@xyflow/react`).
+
 ## Getting Started
 
 First, run the development server:

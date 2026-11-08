@@ -37,7 +37,7 @@ export default function AppHeader({ currentDate, currentTime, onOpenCreateModal 
         </div>
 
         {/* Shrinking Center Navigation Taskbar */}
-        <nav className="flex items-center p-1 rounded-full bg-neutral-950 border border-neutral-800 gap-1 flex-1 sm:flex-none justify-center max-w-[200px] sm:max-w-none">
+        <nav className="flex items-center p-1 rounded-full bg-neutral-950 border border-neutral-800 gap-1 flex-1 sm:flex-none justify-center max-w-[260px] sm:max-w-none">
           <Link href="/" className={`px-3 sm:px-4 py-1.5 rounded-full font-medium text-[11px] sm:text-xs transition-all ${
             pathname === '/' ? 'bg-white text-black font-semibold shadow-sm' : 'text-neutral-400 hover:text-white'
           }`}>
@@ -47,6 +47,11 @@ export default function AppHeader({ currentDate, currentTime, onOpenCreateModal 
             pathname === '/progress' ? 'bg-white text-black font-semibold shadow-sm' : 'text-neutral-400 hover:text-white'
           }`}>
             Progress
+          </Link>
+          <Link href="/goals" className={`px-3 sm:px-4 py-1.5 rounded-full font-medium text-[11px] sm:text-xs transition-all ${
+            pathname === '/goals' ? 'bg-white text-black font-semibold shadow-sm' : 'text-neutral-400 hover:text-white'
+          }`}>
+            Goals
           </Link>
         </nav>
 
