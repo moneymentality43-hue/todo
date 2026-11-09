@@ -5,6 +5,7 @@ import { ArrowLeft, Eye, Pencil, Trash2, Check, LoaderCircle, TriangleAlert } fr
 import { updatePlan, deletePlan } from '../../../app/goals/actions';
 import { useGoals } from '../../../app/goals/GoalsProvider';
 import type { GoalPlanDTO } from '../../../types/goals';
+import { LIMITS } from '../../../types/goals';
 import Markdown from '../Markdown';
 
 interface PlanEditorProps {
@@ -135,13 +136,14 @@ export default function PlanEditor({ plan, onBack, onSaved, onDeleted }: PlanEdi
             </button>
           ))}
         </div>
-        <span className="text-[10px] font-mono text-neutral-600">Markdown supported</span>
+        <span className="text-[10px] font-mono text-neutral-600">Markdown supported · {body.length} / {LIMITS.planBody}</span>
       </div>
 
       {mode === 'edit' ? (
         <textarea
           value={body}
-          onChange={e => { setBody(e.target.value); latest.current.body = e.target.value; schedule(); }}
+          onChange={e => { const v = e.target.value.slice(0, LIMITS.planBody); setBody(v); latest.current.body = v; schedule(); }}
+          maxLength={LIMITS.planBody}
           placeholder={'Write your plan…\n\n# Heading\n- bullet\n**bold**, *italic*, `code`'}
           aria-label="Plan body"
           className="w-full min-h-[260px] resize-y rounded-xl bg-[#101010] border border-[#262626] focus:border-white p-4 text-sm text-neutral-200 placeholder-neutral-700 outline-none font-mono leading-relaxed transition-colors"

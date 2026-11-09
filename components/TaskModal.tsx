@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Zap, Clock, Bell, AlertTriangle, Trash2 } from 'lucide-react';
 import { Task } from '../types';
 import ImportanceLightsHeader from './ImportanceLightsHeader';
+import { FIELD_LIMITS } from '../lib/validation';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -112,7 +113,7 @@ export default function TaskModal({ isOpen, onClose, onSave, onDelete, initialTa
 
           <div>
             <label className="text-xs font-medium text-neutral-400 block mb-1">Task Title</label>
-            <input type="text" required placeholder={rail === 'urgent' ? 'e.g. Finalize quarterly tax reconciliation' : 'e.g. Dissect Raymarching & SDF shaders'} value={title} onChange={(e) => setTitle(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 focus:border-white rounded-xl px-3.5 py-2 text-sm text-white placeholder-neutral-600 outline-none transition-all" />
+            <input type="text" required maxLength={FIELD_LIMITS.title} placeholder={rail === 'urgent' ? 'e.g. Finalize quarterly tax reconciliation' : 'e.g. Dissect Raymarching & SDF shaders'} value={title} onChange={(e) => setTitle(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 focus:border-white rounded-xl px-3.5 py-2 text-sm text-white placeholder-neutral-600 outline-none transition-all" />
           </div>
 
           <div className="p-3 bg-neutral-950 border border-neutral-800 rounded-xl flex flex-col gap-2">
@@ -161,7 +162,7 @@ export default function TaskModal({ isOpen, onClose, onSave, onDelete, initialTa
 
             <div className="pt-2">
               <label className="text-xs text-neutral-300 block mb-1 font-semibold">Starter Step (starter: ...)</label>
-              <input type="text" value={microStep} onChange={(e) => setMicroStep(e.target.value)} placeholder="e.g. Launch workspace & review first item" className="w-full bg-black border border-neutral-800 rounded-lg focus:border-white px-3 py-1.5 text-xs text-white placeholder-neutral-600 outline-none" />
+              <input type="text" value={microStep} maxLength={FIELD_LIMITS.microStep - 'starter: '.length} onChange={(e) => setMicroStep(e.target.value)} placeholder="e.g. Launch workspace & review first item" className="w-full bg-black border border-neutral-800 rounded-lg focus:border-white px-3 py-1.5 text-xs text-white placeholder-neutral-600 outline-none" />
             </div>
           </div>
 

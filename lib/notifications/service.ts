@@ -53,9 +53,9 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
         userId: input.userId,
         type: input.type,
         dedupeKey: input.dedupeKey,
-        title: input.title,
-        body: input.body,
-        url: input.url,
+        title: input.title.slice(0, 200),
+        body: input.body.slice(0, 1000),
+        url: input.url?.slice(0, 2048),
         data: input.data as Prisma.InputJsonValue | undefined,
         status,
         error: reason,
@@ -89,7 +89,7 @@ async function dispatch(id: string): Promise<NotifyResult> {
   const finish = (status: 'SENT' | 'SKIPPED' | 'FAILED', error?: string) =>
     prisma.notificationLog.update({
       where: { id },
-      data: { status, error: error ?? null, sentAt: status === 'SENT' ? new Date() : null },
+      data: { status, error: error ? error.slice(0, 1000) : null, sentAt: status === 'SENT' ? new Date() : null },
     });
 
   if (log.expiresAt && log.expiresAt < now) {
@@ -127,7 +127,7 @@ async function dispatch(id: string): Promise<NotifyResult> {
     }
     await prisma.notificationLog.update({
       where: { id },
-      data: { error: failure.error, sendAfter: new Date(Date.now() + log.attempts * 2 * 60_000) },
+      data: { error: failure.error.slice(0, 1000), sendAfter: new Date(Date.now() + log.attempts * 2 * 60_000) },
     });
     return { status: 'RETRY', reason: failure.error };
   }

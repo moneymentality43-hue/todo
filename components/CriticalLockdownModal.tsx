@@ -2,6 +2,10 @@ import React, { useState } from 'react';
 import { AlertTriangle, Lock } from 'lucide-react';
 import { Task } from '../types';
 import ImportanceLightsHeader from './ImportanceLightsHeader';
+import { FIELD_LIMITS } from '../lib/validation';
+
+// Leaves room for the "MISSED DEADLINE: " prefix added before saving
+const MAX_EXCUSE = FIELD_LIMITS.longText - 'MISSED DEADLINE: '.length;
 
 interface CriticalLockdownModalProps {
   task: Task;
@@ -55,6 +59,7 @@ export default function CriticalLockdownModal({ task, onSubmitExcuse }: Critical
               <textarea
                 rows={4}
                 required
+                maxLength={MAX_EXCUSE}
                 value={excuse}
                 onChange={(e) => setExcuse(e.target.value)}
                 placeholder="Provide a detailed reason. Minimum 10 characters required..."

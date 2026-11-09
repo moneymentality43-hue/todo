@@ -56,6 +56,20 @@ The **Goals** tab (`/goals`) has three views: **Goals**, **Tasks** and **Graph**
 Code lives in `app/goals/` (server actions in `actions.ts`), `components/goals/`, `lib/goals/` and `types/goals.ts`. The models (`Goal`, `GoalPlan`, `GoalTask`, `GoalTaskLog`) are additive: run `npx prisma db push` to create them.
 The graph uses [React Flow](https://reactflow.dev) (`@xyflow/react`).
 
+## Authentication and input limits
+
+`/login` has **Sign In** and **Sign Up** tabs (accounts are no longer auto-created). Server actions: `signInAction` / `signUpAction` in `app/actions.ts`.
+
+| Rule | Behaviour |
+| --- | --- |
+| Username | 3-30 chars, letters/numbers/`_ . -`, stored lowercase, case-insensitive unique |
+| Password (sign up) | 10-64 chars with upper + lower + number + symbol, no spaces, must not contain the username (bcrypt, cost 12). Sign-in only caps the length so older accounts keep working |
+| Lockout | 5 wrong passwords lock the account for 15 minutes (`failedLoginCount`, `lockedUntil` on `User`) |
+| Errors | Sign-in always answers "Invalid username or password" (no user enumeration) |
+| `JWT_SECRET` | Required, at least 32 characters |
+
+Every text field has a limit, enforced three times: `maxLength` in the UI, server-side checks (`lib/validation.ts`, `types/goals.ts`) and `@db.VarChar(n)` in `prisma/schema.prisma`. Titles/names are 120 chars (metric name 60, starter step 200) and long text (plans, reflections, excuses) is 6000 chars (~1000 words). All queries go through Prisma (the one raw query is a parameterised tagged template), so user input is never concatenated into SQL. After changing limits run `npx prisma db push`.
+
 ## Getting Started
 
 First, run the development server:

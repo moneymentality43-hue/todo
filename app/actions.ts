@@ -1,47 +1,41 @@
 "use server";
 
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { revalidatePath, unstable_noStore as noStore } from 'next/cache';
 import { cookies } from 'next/headers';
 import bcrypt from 'bcryptjs';
 import { encrypt, getSession } from '../lib/auth';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
+import {
+  FIELD_LIMITS,
+  LIGHT_COLORS,
+  TASK_RAILS,
+  isPasswordWithinLimit,
+  normalizeUsername,
+  optionalText,
+  requireDate,
+  requireInt,
+  requireOneOf,
+  requireText,
+  validateNewPassword,
+  validateUsername,
+} from '../lib/validation';
 
 // ==========================================
 // 1. AUTHENTICATION ACTIONS
 // ==========================================
 
-export async function loginAction(formData: FormData) {
-  const username = formData.get('username') as string;
-  const password = formData.get('password') as string;
+const BCRYPT_COST = 12;
+const MAX_FAILED_LOGINS = 5;
+const LOCK_MINUTES = 15;
+const INVALID_CREDENTIALS = 'Invalid username or password';
 
-  if (!username || !password) {
-    return { error: 'Username and password are required' };
-  }
+// Compared against when the user does not exist so that response time does not reveal which usernames are registered
+let dummyHash: Promise<string> | undefined;
+const getDummyHash = () => (dummyHash ??= bcrypt.hash('not-a-real-password', BCRYPT_COST));
 
-  const user = await prisma.user.findUnique({
-    where: { username }
-  });
-
-  let validUser = user;
-  if (!user) {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    validUser = await prisma.user.create({
-      data: {
-        username,
-        password: hashedPassword
-      }
-    });
-  } else {
-    const isValid = await bcrypt.compare(password, user.password);
-    if (!isValid) {
-      return { error: 'Invalid credentials' };
-    }
-  }
-
-  const session = await encrypt({ userId: validUser.id });
-  
+async function startSession(userId: string) {
+  const session = await encrypt({ userId });
   const cookieStore = await cookies();
   cookieStore.set('gof_session', session, {
     httpOnly: true,
@@ -50,7 +44,97 @@ export async function loginAction(formData: FormData) {
     maxAge: 72 * 60 * 60, // 72 hours
     path: '/',
   });
+}
 
+function readField(formData: FormData, name: string): string {
+  const value = formData?.get(name);
+  return typeof value === 'string' ? value : '';
+}
+
+export async function signInAction(formData: FormData) {
+  const rawUsername = readField(formData, 'username');
+  const password = readField(formData, 'password');
+
+  if (!rawUsername || !password) {
+    return { error: 'Username and password are required' };
+  }
+  // Oversized input is rejected before it reaches bcrypt or the database
+  const username = normalizeUsername(rawUsername);
+  if (username.length > FIELD_LIMITS.usernameMax || !isPasswordWithinLimit(password)) {
+    return { error: INVALID_CREDENTIALS };
+  }
+
+  // Insensitive so accounts created before usernames were normalised can still sign in
+  const user = await prisma.user.findFirst({
+    where: { username: { equals: username, mode: 'insensitive' } },
+  });
+
+  if (!user) {
+    await bcrypt.compare(password, await getDummyHash());
+    return { error: INVALID_CREDENTIALS };
+  }
+
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    return { error: 'Too many failed attempts. Try again in a few minutes.' };
+  }
+
+  const isValid = await bcrypt.compare(password, user.password);
+  if (!isValid) {
+    const { failedLoginCount } = await prisma.user.update({
+      where: { id: user.id },
+      data: { failedLoginCount: { increment: 1 } },
+      select: { failedLoginCount: true },
+    });
+    if (failedLoginCount >= MAX_FAILED_LOGINS) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginCount: 0, lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000) },
+      });
+    }
+    return { error: INVALID_CREDENTIALS };
+  }
+
+  if (user.failedLoginCount > 0 || user.lockedUntil) {
+    await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
+  }
+
+  await startSession(user.id);
+  return { success: true };
+}
+
+export async function signUpAction(formData: FormData) {
+  const rawUsername = readField(formData, 'username');
+  const password = readField(formData, 'password');
+  const confirm = readField(formData, 'confirmPassword');
+
+  const usernameCheck = validateUsername(rawUsername);
+  if (usernameCheck.ok === false) return { error: usernameCheck.error };
+  const { username } = usernameCheck;
+
+  const passwordCheck = validateNewPassword(password, username);
+  if (passwordCheck.ok === false) return { error: passwordCheck.error };
+  if (password !== confirm) return { error: 'Passwords do not match' };
+
+  const taken = await prisma.user.findFirst({
+    where: { username: { equals: username, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  if (taken) return { error: 'That username is already taken' };
+
+  const hashedPassword = await bcrypt.hash(password, BCRYPT_COST);
+  let userId: string;
+  try {
+    const user = await prisma.user.create({ data: { username, password: hashedPassword }, select: { id: true } });
+    userId = user.id;
+  } catch (e) {
+    // Two signups for the same name racing past the check above
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      return { error: 'That username is already taken' };
+    }
+    throw e;
+  }
+
+  await startSession(userId);
   return { success: true };
 }
 
@@ -85,21 +169,31 @@ export async function getTasks() {
   });
 }
 
+function parseTaskInput(data: Record<string, unknown> | null | undefined) {
+  const rail = requireOneOf(data?.rail, TASK_RAILS, 'Rail');
+  const notificationIntervalMin =
+    data?.notificationIntervalMin === null || data?.notificationIntervalMin === undefined || data?.notificationIntervalMin === ''
+      ? null
+      : requireInt(data.notificationIntervalMin, 1, FIELD_LIMITS.maxMinutes, 'Notification interval');
+  const warningRaw = Number(data?.warningThresholdMin);
+
+  return {
+    rail,
+    title: requireText(data?.title, FIELD_LIMITS.title, 'Title'),
+    deadline: requireDate(data?.deadline, 'Deadline'),
+    importanceLevel: requireInt(data?.importanceLevel, 1, 5, 'Importance level'),
+    lightColor: requireOneOf(data?.lightColor, LIGHT_COLORS, 'Light color'),
+    microStep: requireText(data?.microStep, FIELD_LIMITS.microStep, 'Starter step'),
+    warningThresholdMin: warningRaw ? requireInt(warningRaw, 1, FIELD_LIMITS.maxMinutes, 'Warning threshold') : 120,
+    notificationIntervalMin,
+  };
+}
+
 export async function createTaskAction(data: any) {
   const userId = await requireAuth();
 
   const newTask = await prisma.task.create({
-    data: {
-      userId, 
-      rail: data.rail,
-      title: data.title,
-      deadline: new Date(data.deadline), 
-      importanceLevel: data.importanceLevel,
-      lightColor: data.lightColor,
-      microStep: data.microStep,
-      warningThresholdMin: Number(data.warningThresholdMin) || 120,
-      notificationIntervalMin: data.notificationIntervalMin ? Number(data.notificationIntervalMin) : null,
-    }
+    data: { userId, ...parseTaskInput(data) }
   });
   revalidatePath('/');
   return newTask;
@@ -110,16 +204,7 @@ export async function updateTaskAction(id: string, data: any) {
 
   const updatedTask = await prisma.task.update({
     where: { id, userId }, 
-    data: {
-      rail: data.rail,
-      title: data.title,
-      deadline: new Date(data.deadline), 
-      importanceLevel: data.importanceLevel,
-      lightColor: data.lightColor,
-      microStep: data.microStep,
-      warningThresholdMin: Number(data.warningThresholdMin) || 120,
-      notificationIntervalMin: data.notificationIntervalMin ? Number(data.notificationIntervalMin) : null,
-    }
+    data: parseTaskInput(data)
   });
   revalidatePath('/');
   return updatedTask;
@@ -137,9 +222,9 @@ export async function completeTaskAction(id: string, score: string, reflection: 
     where: { id, userId },
     data: {
       status: isFailed ? 'FAILED' : 'COMPLETED',
-      score,
-      reflection,
-      completedAt,
+      score: requireText(score, FIELD_LIMITS.score, 'Score'),
+      reflection: optionalText(reflection, FIELD_LIMITS.longText, 'Reflection') ?? '',
+      completedAt: optionalText(completedAt, FIELD_LIMITS.completedAt, 'Completion time') ?? '',
     }
   });
 }
@@ -176,12 +261,13 @@ export async function getMilestones() {
 
 export async function createMilestoneAction(dateString: string) {
   const userId = await requireAuth();
-  const dateObj = new Date(dateString);
+  const label = requireText(dateString, FIELD_LIMITS.dateString, 'Date');
+  const dateObj = new Date(label);
 
   const newMilestone = await prisma.milestone.create({
     data: {
       userId,
-      dateString,
+      dateString: label,
       date: isNaN(dateObj.getTime()) ? new Date() : dateObj,
     },
     include: { metrics: true }
@@ -192,19 +278,22 @@ export async function createMilestoneAction(dateString: string) {
 
 export async function createMetricAction(milestoneId: string, name: string, val: number) {
   const userId = await requireAuth();
+  const cleanName = requireText(name, FIELD_LIMITS.metricName, 'Metric name');
+  const cleanVal = requireInt(val, -FIELD_LIMITS.maxValue, FIELD_LIMITS.maxValue, 'Metric value');
   
   // Verify ownership before modifying
   const milestone = await prisma.milestone.findUnique({ where: { id: milestoneId, userId } });
   if (!milestone) throw new Error('Unauthorized');
 
   await prisma.metric.create({
-    data: { milestoneId, name, val }
+    data: { milestoneId, name: cleanName, val: cleanVal }
   });
   revalidatePath('/progress');
 }
 
 export async function updateMetricValAction(metricId: string, newVal: number) {
   const userId = await requireAuth();
+  const cleanVal = requireInt(newVal, -FIELD_LIMITS.maxValue, FIELD_LIMITS.maxValue, 'Metric value');
   
   // Verify ownership
   const metric = await prisma.metric.findUnique({ where: { id: metricId }, include: { milestone: true } });
@@ -212,7 +301,7 @@ export async function updateMetricValAction(metricId: string, newVal: number) {
 
   await prisma.metric.update({
     where: { id: metricId },
-    data: { val: newVal }
+    data: { val: cleanVal }
   });
   revalidatePath('/progress');
 }

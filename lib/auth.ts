@@ -3,6 +3,9 @@ import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 
 const secretKey = process.env.JWT_SECRET;
+if (!secretKey || secretKey.length < 32) {
+  throw new Error('JWT_SECRET must be set to a random string of at least 32 characters');
+}
 const key = new TextEncoder().encode(secretKey);
 
 // Create a 72-hour token

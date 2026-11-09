@@ -1,6 +1,9 @@
 // components/TimelineNode.tsx
 import React, { useState, useTransition } from 'react';
 import { Plus, Minus, X, ChevronRight, ChevronDown, Trash2 } from 'lucide-react';
+import { FIELD_LIMITS } from '../lib/validation';
+
+const MAX_METRIC_VALUE = FIELD_LIMITS.maxValue;
 
 interface Metric {
   id: string;
@@ -30,7 +33,8 @@ export default function TimelineNode({
   const [isPending, startTransition] = useTransition();
 
   const handleAddSubmit = () => {
-    const val = newMetricVal.trim() === '' ? 20 : parseInt(newMetricVal, 10);
+    const parsed = newMetricVal.trim() === '' ? 20 : parseInt(newMetricVal, 10);
+    const val = Number.isFinite(parsed) ? Math.min(MAX_METRIC_VALUE, Math.max(-MAX_METRIC_VALUE, parsed)) : 20;
     const name = newMetricName.trim() || 'Custom Metric';
     
     onAddMetric(id, name, val);
@@ -112,7 +116,7 @@ export default function TimelineNode({
                         </div>
                         <button 
                           disabled={isPending}
-                          onClick={() => handleOptimisticUpdate(metric.id, metric.val + 1)} 
+                          onClick={() => handleOptimisticUpdate(metric.id, Math.min(MAX_METRIC_VALUE, metric.val + 1))} 
                           className="w-10 h-10 sm:w-7 sm:h-7 rounded-md bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white flex items-center justify-center active:scale-95 transition-all disabled:opacity-50"
                         >
                           <Plus className="w-4 h-4" />
@@ -149,6 +153,7 @@ export default function TimelineNode({
                       autoFocus
                       type="text" 
                       value={newMetricName} 
+                      maxLength={FIELD_LIMITS.metricName}
                       onChange={e => setNewMetricName(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') handleAddSubmit(); if (e.key === 'Escape') setIsAddMetricFormOpen(false); }}
                       placeholder="e.g. Focus Hours, Code Output" 
@@ -160,6 +165,8 @@ export default function TimelineNode({
                     <input 
                       type="number" 
                       value={newMetricVal} 
+                      min={-MAX_METRIC_VALUE}
+                      max={MAX_METRIC_VALUE}
                       onChange={e => setNewMetricVal(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') handleAddSubmit(); }}
                       className="bg-black border border-neutral-700 rounded-lg px-4 py-3 text-xs text-white focus:outline-none focus:border-white w-full sm:text-center transition-colors"

@@ -3,6 +3,7 @@ import { X, Target, Check } from 'lucide-react';
 import { Task } from '../types';
 import ImportanceLightsHeader from './ImportanceLightsHeader';
 import { playSound } from '../audio'; // Added sound import
+import { FIELD_LIMITS } from '../lib/validation';
 
 interface AccomplishmentModalProps {
   task: Task;
@@ -54,8 +55,9 @@ export default function AccomplishmentModal({ task, mode, onClose, onSave }: Acc
         <div>
           <label className="text-xs font-semibold text-neutral-200 flex items-center gap-1.5 mb-2"><span className="w-1.5 h-1.5 rounded-full bg-white"></span><span>What was accomplished?</span></label>
           <div className="w-full bg-[#141414] border border-[#262626] focus-within:border-white rounded-xl p-3.5 transition-all">
-            <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder="Document outcome, breakthroughs, key findings or links..." className="w-full bg-transparent text-xs sm:text-sm text-neutral-100 placeholder-neutral-600 outline-none leading-relaxed resize-none font-sans" />
+            <textarea rows={3} value={text} maxLength={FIELD_LIMITS.longText} onChange={(e) => setText(e.target.value)} placeholder="Document outcome, breakthroughs, key findings or links..." className="w-full bg-transparent text-xs sm:text-sm text-neutral-100 placeholder-neutral-600 outline-none leading-relaxed resize-none font-sans" />
           </div>
+          <p className="text-[10px] font-mono text-neutral-600 text-right mt-1">{text.length} / {FIELD_LIMITS.longText}</p>
         </div>
 
         <div>
@@ -65,7 +67,7 @@ export default function AccomplishmentModal({ task, mode, onClose, onSave }: Acc
           </div>
           <div className="relative flex items-center bg-[#111111] border border-[#262626] focus-within:border-white rounded-xl transition-all overflow-hidden group">
             <div className="pl-4 pr-2 text-white flex items-center pointer-events-none"><Target className="w-4 h-4" /></div>
-            <input type="number" min="0" max="300" value={score} onChange={(e) => setScore(e.target.value)} placeholder="100" className="w-full bg-transparent py-3 px-2 text-white font-headline text-base font-semibold tracking-wide outline-none placeholder-neutral-600" />
+            <input type="number" min="0" max="300" value={score} onChange={(e) => setScore(e.target.value.slice(0, 6))} placeholder="100" className="w-full bg-transparent py-3 px-2 text-white font-headline text-base font-semibold tracking-wide outline-none placeholder-neutral-600" />
             <div className="pr-4 pl-2 flex items-center gap-1.5"><span className="text-xs font-mono font-bold px-2 py-1 rounded-md bg-white text-black select-none">%</span></div>
           </div>
         </div>

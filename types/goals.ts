@@ -12,7 +12,7 @@ export type WorkType = (typeof WORK_TYPES)[number];
 export const LIMITS = {
   goalName: 120,
   planTitle: 120,
-  planBody: 50_000,
+  planBody: 6000, // roughly 1000 words
   taskTitle: 120,
   unit: 20,
   maxValue: 1_000_000_000,

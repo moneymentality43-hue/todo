@@ -10,8 +10,10 @@ datasource db {
 
 model User {
   id         String      @id @default(cuid())
-  username   String      @unique
-  password   String      // Hashed password
+  username   String      @unique @db.VarChar(30) // lowercase
+  password   String      @db.VarChar(100)        // bcrypt hash
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
   tasks      Task[]
   milestones Milestone[] // Ties progress milestones to user
   createdAt  DateTime    @default(now())
@@ -29,18 +31,18 @@ model Task {
   userId          String   // Ties the task to the user
   user            User     @relation(fields: [userId], references: [id])
   
-  rail            String   
-  title           String
+  rail            String   @db.VarChar(20)
+  title           String   @db.VarChar(120)
   deadline        DateTime 
   importanceLevel Int      @default(3)
-  lightColor      String   
-  microStep       String
+  lightColor      String   @db.VarChar(20)
+  microStep       String   @db.VarChar(200)
   warningThresholdMin     Int      @default(120) 
   notificationIntervalMin Int?     
-  status          String   @default("ACTIVE") 
-  score           String?
-  reflection      String?
-  completedAt     String?
+  status          String   @default("ACTIVE") @db.VarChar(20)
+  score           String?  @db.VarChar(20)
+  reflection      String?  @db.VarChar(6000)
+  completedAt     String?  @db.VarChar(40)
   
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -56,7 +58,7 @@ model Milestone {
   user       User     @relation(fields: [userId], references: [id])
   
   date       DateTime // Absolute date for chronological sorting
-  dateString String   // Display string (e.g. "9/20/26")
+  dateString String   @db.VarChar(20) // Display string (e.g. "9/20/26")
   
   metrics    Metric[] // The points tracked on this date
   
@@ -68,7 +70,7 @@ model Metric {
   milestoneId String
   milestone   Milestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
   
-  name        String
+  name        String    @db.VarChar(60)
   val         Int
   
   createdAt   DateTime  @default(now())
@@ -84,8 +86,8 @@ model Goal {
   userId    String
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  name      String
-  status    String     @default("IN_PROGRESS") // IN_PROGRESS | PAUSED | COMPLETED
+  name      String     @db.VarChar(120)
+  status    String     @default("IN_PROGRESS") @db.VarChar(20) // IN_PROGRESS | PAUSED | COMPLETED
 
   parentId  String?
   parent    Goal?      @relation("GoalTree", fields: [parentId], references: [id], onDelete: SetNull)
@@ -106,8 +108,8 @@ model GoalPlan {
   goalId    String
   goal      Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
 
-  title     String
-  body      String   @default("") @db.Text // markdown
+  title     String   @db.VarChar(120)
+  body      String   @default("") @db.VarChar(6000) // markdown
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -124,13 +126,13 @@ model GoalTask {
   goalId     String?
   goal       Goal?         @relation(fields: [goalId], references: [id], onDelete: SetNull)
 
-  title      String
-  metricType String        // COUNT | PERCENT | DURATION | YESNO | CUSTOM
-  unit       String?       // label for CUSTOM metrics
+  title      String        @db.VarChar(120)
+  metricType String        @db.VarChar(20) // COUNT | PERCENT | DURATION | YESNO | CUSTOM
+  unit       String?       @db.VarChar(20) // label for CUSTOM metrics
   target     Float         // PERCENT = 100, YESNO = 1, DURATION in minutes
   current    Float         @default(0)
 
-  workType     String      @default("SHALLOW") // DEEP | SHALLOW
+  workType     String      @default("SHALLOW") @db.VarChar(20) // DEEP | SHALLOW
   timeSpentMin Int         @default(0)         // manually logged, independent of the progress metric
 
   logs        GoalTaskLog[]
@@ -166,10 +168,10 @@ model PushSubscription {
   userId        String
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  endpoint      String    @unique
-  p256dh        String
-  auth          String
-  userAgent     String?
+  endpoint      String    @unique @db.VarChar(2048)
+  p256dh        String    @db.VarChar(256)
+  auth          String    @db.VarChar(256)
+  userAgent     String?   @db.VarChar(300)
 
   createdAt     DateTime  @default(now())
   lastSuccessAt DateTime?
@@ -183,7 +185,7 @@ model NotificationSettings {
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   enabled    Boolean  @default(true)
-  timezone   String   @default("UTC")  // IANA name, e.g. "Asia/Kolkata"
+  timezone   String   @default("UTC") @db.VarChar(64) // IANA name, e.g. "Asia/Kolkata"
   quietStart Int?     // minutes from midnight in `timezone`; null = no quiet hours
   quietEnd   Int?
   typePrefs  Json     @default("{}")   // { [type]: boolean } overrides of the registry defaults
@@ -197,16 +199,16 @@ model NotificationLog {
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  type      String
-  dedupeKey String    @unique
-  title     String
-  body      String
-  url       String?
+  type      String    @db.VarChar(50)
+  dedupeKey String    @unique @db.VarChar(200)
+  title     String    @db.VarChar(200)
+  body      String    @db.VarChar(1000)
+  url       String?   @db.VarChar(2048)
   data      Json?
 
-  status    String    @default("PENDING") // PENDING | SENT | SKIPPED | FAILED
+  status    String    @default("PENDING") @db.VarChar(20) // PENDING | SENT | SKIPPED | FAILED
   attempts  Int       @default(0)
-  error     String?
+  error     String?   @db.VarChar(1000)
   sendAfter DateTime  @default(now())
   expiresAt DateTime? // after this a pending notification is dropped instead of sent late
   sentAt    DateTime?
