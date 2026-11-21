@@ -2,35 +2,21 @@ import type { DueGoal } from './settings';
 
 const MAX_BODY_CHARS = 900;
 
-// One line per top-level goal: "Career: Learn Rust, Ship app". Groups are ordered by name, and inside a
-// group by depth then name. A due top-level goal is listed first as "itself".
+// One goal per line: "Career" for a top-level goal, "Career › Learn Rust" for a nested one. Goals are
+// ordered by top-level goal name, then depth, then name.
 export function buildDigest(due: DueGoal[]): { count: number; body: string } {
-  const groups = new Map<string, { name: string; items: DueGoal[] }>();
-  for (const g of due) {
-    const group = groups.get(g.rootId) ?? { name: g.rootName, items: [] };
-    group.items.push(g);
-    groups.set(g.rootId, group);
-  }
-
-  const lines = [...groups.entries()]
-    .sort(([, a], [, b]) => a.name.localeCompare(b.name))
-    .map(([rootId, group]) => {
-      const items = [...group.items].sort((a, b) => a.depth - b.depth || a.name.localeCompare(b.name));
-      const labels = items.map((i) => (i.id === rootId ? 'itself' : i.name));
-      const alone = items.length === 1 && items[0].id === rootId;
-      return { count: items.length, text: alone ? group.name : `${group.name}: ${labels.join(', ')}` };
-    });
+  const lines = [...due]
+    .sort((a, b) => a.rootName.localeCompare(b.rootName) || a.rootId.localeCompare(b.rootId) || a.depth - b.depth || a.name.localeCompare(b.name))
+    .map((g) => (g.id === g.rootId ? g.name : `${g.rootName} › ${g.name}`));
 
   const kept: string[] = [];
   let used = 0;
-  let shown = 0;
   for (const line of lines) {
-    if (kept.length > 0 && used + line.text.length > MAX_BODY_CHARS) break;
-    kept.push(line.text.slice(0, MAX_BODY_CHARS));
-    used += line.text.length + 1;
-    shown += line.count;
+    if (kept.length > 0 && used + line.length > MAX_BODY_CHARS) break;
+    kept.push(line.slice(0, MAX_BODY_CHARS));
+    used += line.length + 1;
   }
-  if (shown < due.length) kept.push(`+${due.length - shown} more`);
+  if (kept.length < due.length) kept.push(`+${due.length - kept.length} more`);
 
   return { count: due.length, body: kept.join('\n') };
 }
