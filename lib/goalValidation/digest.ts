@@ -2,12 +2,9 @@ import type { DueGoal } from './settings';
 
 const MAX_BODY_CHARS = 900;
 
-// One goal per line: "Career" for a top-level goal, "Career › Learn Rust" for a nested one. Goals are
-// ordered by top-level goal name, then depth, then name.
+// One bullet per goal, using just the goal name, sorted alphabetically.
 export function buildDigest(due: DueGoal[]): { count: number; body: string } {
-  const lines = [...due]
-    .sort((a, b) => a.rootName.localeCompare(b.rootName) || a.rootId.localeCompare(b.rootId) || a.depth - b.depth || a.name.localeCompare(b.name))
-    .map((g) => (g.id === g.rootId ? g.name : `${g.rootName} › ${g.name}`));
+  const lines = due.map((g) => `• ${g.name}`).sort((a, b) => a.localeCompare(b));
 
   const kept: string[] = [];
   let used = 0;
