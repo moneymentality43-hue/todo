@@ -32,6 +32,19 @@ export const NOTIFICATION_TYPES = {
     defaultEnabled: true,
     quietHours: 'ignore',
   },
+  // The two below are controlled from the Validation panel, not the bell panel's toggles
+  VALIDATION_DIGEST: {
+    label: 'Validation reminders',
+    description: 'Goals that need validating, at the times chosen in the Validation panel.',
+    defaultEnabled: true,
+    quietHours: 'ignore', // the user picked these times themselves
+  },
+  GOAL_RESUMED: {
+    label: 'Goal resumed',
+    description: 'A paused goal reached its resume date and needs validating.',
+    defaultEnabled: true,
+    quietHours: 'defer',
+  },
 } as const satisfies Record<string, NotificationTypeDef>;
 
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

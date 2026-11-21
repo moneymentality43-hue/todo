@@ -1,5 +1,7 @@
 // Shared goal types and constants (kept out of "use server" files, which may only export async functions)
 
+import type { GoalPauseDTO, GoalValidationDTO } from './validation';
+
 export const GOAL_STATUSES = ['IN_PROGRESS', 'PAUSED', 'COMPLETED'] as const;
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 
@@ -40,6 +42,12 @@ export interface GoalSummary extends WorkTime {
   parentName: string | null;
   subGoalCount: number;
   taskCount: number;
+  validationPeriodDays: number;
+  lastValidatedAt: string | null;
+  validUntil: string | null; // null until validated, or when validation is off
+  needsValidation: boolean; // always false while the validation feature is off
+  pausedUntil: string | null;
+  pausedByGoalId: string | null; // set for goals paused together with another goal
 }
 
 export interface GoalTaskDTO {
@@ -75,6 +83,17 @@ export interface GoalDetail extends WorkTime {
   plans: GoalPlanDTO[];
   children: GoalSummary[];
   tasks: GoalTaskDTO[];
+  validationEnabled: boolean;
+  validationPeriodDays: number;
+  lastValidatedAt: string | null;
+  validUntil: string | null;
+  needsValidation: boolean;
+  pausedUntil: string | null;
+  pauseReason: string | null;
+  pausedByGoalId: string | null;
+  pausedByGoalName: string | null;
+  validations: GoalValidationDTO[]; // latest 20
+  pauses: GoalPauseDTO[]; // latest 10
 }
 
 export interface TaskLogDTO {

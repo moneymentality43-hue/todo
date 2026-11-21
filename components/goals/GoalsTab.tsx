@@ -123,9 +123,15 @@ export default function GoalsTab() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <h3 className="font-headline text-base font-semibold text-white leading-snug break-words min-w-0">{g.name}</h3>
-                    <StatusBadge status={g.status} />
+                    <div className="flex items-center gap-2 shrink-0">
+                      {g.needsValidation && <span title="Needs validation" aria-label="Needs validation" className="w-2 h-2 rounded-full bg-white animate-pulse" />}
+                      <StatusBadge status={g.status} />
+                    </div>
                   </div>
                   {g.parentName && <p className="mt-1 text-[11px] font-mono text-neutral-500 truncate">↳ under {g.parentName}</p>}
+                  {g.status === 'PAUSED' && g.pausedUntil && (
+                    <p className="mt-1 text-[11px] font-mono text-neutral-500 truncate">until {new Date(g.pausedUntil).toLocaleDateString([], { dateStyle: 'medium' })}</p>
+                  )}
                   <div className="mt-4 flex items-center gap-4 text-[11px] font-mono text-neutral-500">
                     <span className="flex items-center gap-1.5"><GitBranch className="w-3.5 h-3.5" /> {g.subGoalCount} sub-goal{g.subGoalCount === 1 ? '' : 's'}</span>
                     <span className="flex items-center gap-1.5"><ListChecks className="w-3.5 h-3.5" /> {g.taskCount} task{g.taskCount === 1 ? '' : 's'}</span>

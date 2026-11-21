@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { logoutAction } from '../app/actions';
 import NotificationSettings from './NotificationSettings';
+import ValidationSettings from './validation/ValidationSettings';
 
 interface AppHeaderProps {
   currentDate: string;
@@ -71,6 +72,7 @@ export default function AppHeader({ currentDate, currentTime, onOpenCreateModal 
             </button>
           )}
 
+          <ValidationSettings />
           <NotificationSettings />
 
           <button onClick={handleLogout} className="w-8 h-8 rounded-full border border-neutral-700 hover:border-white text-neutral-400 hover:text-white transition-all flex items-center justify-center font-bold text-[10px] sm:text-xs">

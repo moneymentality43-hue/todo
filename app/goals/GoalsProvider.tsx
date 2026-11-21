@@ -4,6 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { useSearchParams } from 'next/navigation';
 import { getGoalsOverview, getTaskLogs } from './actions';
 import type { GoalSummary, GoalTaskDTO, TaskLogDTO } from '../../types/goals';
+import { VALIDATION_CHANGED_EVENT, VALIDATION_SETTINGS_EVENT } from '../../types/validation';
 
 export type GoalsTab = 'goals' | 'tasks' | 'graph';
 const TABS: GoalsTab[] = ['goals', 'tasks', 'graph'];
@@ -86,6 +87,7 @@ export default function GoalsProvider({ children }: { children: React.ReactNode 
       setGoals(g);
       setTasks(t);
       setLoadError(null);
+      window.dispatchEvent(new Event(VALIDATION_CHANGED_EVENT));
       // The first load must not bump the version, otherwise an open dialog would fetch its goal twice
       if (hasLoaded.current) setVersion(v => v + 1);
       hasLoaded.current = true;
@@ -101,6 +103,13 @@ export default function GoalsProvider({ children }: { children: React.ReactNode 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
+  }, [refresh]);
+
+  // Saving the validation settings in the header changes what the goal views show
+  useEffect(() => {
+    const onSettings = () => { void refresh(); };
+    window.addEventListener(VALIDATION_SETTINGS_EVENT, onSettings);
+    return () => window.removeEventListener(VALIDATION_SETTINGS_EVENT, onSettings);
   }, [refresh]);
 
   const activeGoalId = stack.length > 0 ? stack[stack.length - 1] : null;

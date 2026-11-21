@@ -32,7 +32,7 @@ export default function AccomplishmentModal({ task, mode, onClose, onSave }: Acc
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-[#0e0e0e] border border-white/80 rounded-2xl w-full max-w-lg p-6 sm:p-7 relative shadow-2xl flex flex-col gap-5 animate-in fade-in zoom-in-95 duration-150" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-[#0e0e0e] border border-white/80 rounded-2xl w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain p-4 sm:p-7 relative shadow-2xl flex flex-col gap-4 sm:gap-5 animate-in fade-in zoom-in-95 duration-150" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between pb-3.5 border-b border-neutral-800">
           <h3 className="text-base font-bold text-white tracking-tight font-headline">Task Accomplishment</h3>
           <button onClick={onClose} className="w-7 h-7 rounded-full flex items-center justify-center border border-neutral-800 text-neutral-400 hover:text-white hover:border-white transition-colors">
@@ -72,7 +72,7 @@ export default function AccomplishmentModal({ task, mode, onClose, onSave }: Acc
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-3 pt-3 border-t border-neutral-800 mt-1">
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 pt-3 border-t border-neutral-800 mt-1">
           <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl text-xs font-medium text-neutral-400 hover:text-white hover:bg-neutral-900 border border-transparent transition-all">Cancel</button>
           <button 
             type="button" 

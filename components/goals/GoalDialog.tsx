@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChevronRight, Ellipsis, Trash2, X } from 'lucide-react';
-import { getGoal, renameGoal, setGoalStatus, deleteGoal } from '../../app/goals/actions';
+import { getGoal, renameGoal, setGoalStatus, deleteGoal, resumeGoal, setValidationPeriod } from '../../app/goals/actions';
 import { useGoals } from '../../app/goals/GoalsProvider';
 import type { GoalDetail, GoalPlanDTO, GoalStatus } from '../../types/goals';
 import StatusSelect from './StatusSelect';
@@ -12,6 +12,11 @@ import PlanEditor from './dialog/PlanEditor';
 import SubGoalsSection from './dialog/SubGoalsSection';
 import TasksSection from './dialog/TasksSection';
 import DeleteGoalConfirm from './dialog/DeleteGoalConfirm';
+import ValidationBar from './dialog/ValidationBar';
+import ValidateGoalDialog from './dialog/ValidateGoalDialog';
+import PauseGoalDialog from './dialog/PauseGoalDialog';
+import PauseBanner from './dialog/PauseBanner';
+import HistorySection from './dialog/HistorySection';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -33,6 +38,8 @@ function DialogBody({ goalId }: { goalId: string }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [modal, setModal] = useState<'validate' | 'pause' | 'pause-edit' | null>(null);
+  const [resuming, setResuming] = useState(false);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
@@ -63,19 +70,20 @@ function DialogBody({ goalId }: { goalId: string }) {
     };
   }, []);
 
-  // Esc peels back one layer at a time: confirm -> menu -> plan editor -> dialog
+  // Esc peels back one layer at a time: validate/pause modal -> confirm -> menu -> plan editor -> dialog
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
-      if (confirmDelete) setConfirmDelete(false);
+      if (modal) setModal(null);
+      else if (confirmDelete) setConfirmDelete(false);
       else if (menuOpen) setMenuOpen(false);
       else if (editingPlanId) setEditingPlanId(null);
       else closeDialog();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [confirmDelete, menuOpen, editingPlanId, closeDialog]);
+  }, [modal, confirmDelete, menuOpen, editingPlanId, closeDialog]);
 
   const trapTab = (e: React.KeyboardEvent) => {
     if (e.key !== 'Tab' || !panelRef.current) return;
@@ -107,6 +115,8 @@ function DialogBody({ goalId }: { goalId: string }) {
 
   const handleStatus = async (status: GoalStatus) => {
     if (!detail) return;
+    // Pausing needs a reason and a resume date, collected in its own dialog
+    if (status === 'PAUSED') return setModal('pause');
     const previous = detail.status;
     setDetail({ ...detail, status });
     const res = await setGoalStatus(detail.id, status);
@@ -115,6 +125,34 @@ function DialogBody({ goalId }: { goalId: string }) {
       notify(res.error);
       return;
     }
+    await refresh();
+  };
+
+  const handleResume = async () => {
+    if (!detail) return;
+    setResuming(true);
+    try {
+      const res = await resumeGoal(detail.id);
+      if (res.ok === false) return notify(res.error);
+      notify('Goal resumed');
+      await refresh();
+    } catch {
+      notify('Could not resume the goal.');
+    } finally {
+      setResuming(false);
+    }
+  };
+
+  const handlePeriod = async (days: number) => {
+    if (!detail) return;
+    const res = await setValidationPeriod(detail.id, days);
+    if (res.ok === false) return notify(res.error);
+    await refresh();
+  };
+
+  const handleModalDone = async (message: string) => {
+    setModal(null);
+    notify(message);
     await refresh();
   };
 
@@ -204,7 +242,12 @@ function DialogBody({ goalId }: { goalId: string }) {
                 className="flex-1 min-w-0 bg-transparent border-b border-transparent hover:border-neutral-800 focus:border-white font-headline text-xl sm:text-2xl font-semibold text-white outline-none transition-colors py-1"
               />
               <div className="flex items-center gap-2 justify-between sm:justify-end">
-                <StatusSelect value={detail.status} onChange={handleStatus} />
+                <StatusSelect
+                  value={detail.status}
+                  onChange={handleStatus}
+                  lockedStatuses={detail.pausedByGoalId ? ['IN_PROGRESS'] : []}
+                  lockedTitle={`Paused together with ${detail.pausedByGoalName ?? 'another goal'}. Resume that goal instead.`}
+                />
                 <div className="relative">
                   <button onClick={() => setMenuOpen(o => !o)} aria-label="Goal options" aria-expanded={menuOpen} className="w-8 h-8 rounded-full border border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-600 flex items-center justify-center transition-colors">
                     <Ellipsis className="w-4 h-4" />
@@ -226,6 +269,8 @@ function DialogBody({ goalId }: { goalId: string }) {
           {detail && (
             <WorkTimeBadge deepMinutes={detail.deepMinutes} shallowMinutes={detail.shallowMinutes} className="mt-2" />
           )}
+          {detail && <PauseBanner detail={detail} busy={resuming} onResume={handleResume} onChangeDate={() => setModal('pause-edit')} onOpenRoot={id => openGoal(id, 'push')} />}
+          {detail && <ValidationBar detail={detail} onValidate={() => setModal('validate')} onPeriodChange={handlePeriod} />}
         </div>
 
         {/* Body */}
@@ -276,12 +321,35 @@ function DialogBody({ goalId }: { goalId: string }) {
                   <PlansSection detail={detail} onOpenPlan={setEditingPlanId} />
                   <SubGoalsSection detail={detail} />
                   <TasksSection detail={detail} />
+                  <HistorySection detail={detail} />
                 </>
               )}
             </>
           )}
         </div>
       </div>
+
+      {detail && modal === 'validate' && (
+        <ValidateGoalDialog
+          goalId={detail.id}
+          goalName={detail.name}
+          ancestors={detail.ancestors}
+          onClose={() => setModal(null)}
+          onError={notify}
+          onValidated={n => handleModalDone(`Validated ${n} goal${n === 1 ? '' : 's'}`)}
+        />
+      )}
+      {detail && (modal === 'pause' || modal === 'pause-edit') && (
+        <PauseGoalDialog
+          goalId={detail.id}
+          goalName={detail.name}
+          mode={modal === 'pause' ? 'create' : 'edit'}
+          currentResumeAt={detail.pausedUntil}
+          onClose={() => setModal(null)}
+          onError={notify}
+          onDone={handleModalDone}
+        />
+      )}
     </div>
   );
 }

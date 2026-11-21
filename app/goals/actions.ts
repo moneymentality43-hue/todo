@@ -29,6 +29,32 @@ import {
   type WorkType,
 } from '../../types/goals';
 import { EMPTY_TIME, rollupTime } from '../../lib/goals/time';
+import {
+  LONG_TEXT_MAX,
+  MAX_PAUSE_DAYS,
+  MIN_PAUSE_LEAD_MIN,
+  PAUSE_MIN_WORDS,
+  PERIOD_MAX,
+  PERIOD_MIN,
+  VALIDATION_MIN_WORDS,
+  countWords,
+  type GoalPauseDTO,
+  type GoalValidationDTO,
+} from '../../types/validation';
+import { goalValidUntil, needsValidation, type ValidationConfig } from '../../lib/goalValidation/status';
+import { getValidationConfig } from '../../lib/goalValidation/settings';
+import { resumeDueGoals } from '../../lib/goalValidation/resume';
+import {
+  clearPauseFields,
+  descendantsOf,
+  loadTree,
+  markCascadePaused,
+  pauseRootFrom,
+  pauseTree,
+  releaseCascade,
+  releaseGroup,
+  resumeTree,
+} from '../../lib/goalValidation/pause';
 
 // ==========================================
 // HELPERS
@@ -72,12 +98,35 @@ const summarySelect = {
   name: true,
   status: true,
   parentId: true,
+  validationPeriodDays: true,
+  lastValidatedAt: true,
+  resumedAt: true,
+  pausedUntil: true,
+  pausedByGoalId: true,
   _count: { select: { children: true, tasks: true } },
 } satisfies Prisma.GoalSelect;
 
 type SummaryRow = Prisma.GoalGetPayload<{ select: typeof summarySelect }>;
 
-function toSummary(r: SummaryRow, parentName: string | null = null, time: WorkTime = EMPTY_TIME): GoalSummary {
+// What is needed to decide a goal's validation state: the user's settings and "now"
+interface ValCtx {
+  cfg: ValidationConfig;
+  now: Date;
+}
+
+const iso = (d: Date | null) => (d ? d.toISOString() : null);
+
+function validationFields(r: SummaryRow, ctx: ValCtx) {
+  const until = ctx.cfg.enabled && r.status === 'IN_PROGRESS' ? goalValidUntil(r, ctx.cfg) : null;
+  return {
+    validationPeriodDays: r.validationPeriodDays,
+    lastValidatedAt: iso(r.lastValidatedAt),
+    validUntil: iso(until),
+    needsValidation: needsValidation(r, ctx.cfg, ctx.now),
+  };
+}
+
+function toSummary(r: SummaryRow, ctx: ValCtx, parentName: string | null = null, time: WorkTime = EMPTY_TIME): GoalSummary {
   return {
     id: r.id,
     name: r.name,
@@ -88,12 +137,15 @@ function toSummary(r: SummaryRow, parentName: string | null = null, time: WorkTi
     taskCount: r._count.tasks,
     deepMinutes: time.deepMinutes,
     shallowMinutes: time.shallowMinutes,
+    ...validationFields(r, ctx),
+    pausedUntil: iso(r.pausedUntil),
+    pausedByGoalId: r.pausedByGoalId,
   };
 }
 
-function toSummaries(rows: SummaryRow[], totals: Map<string, WorkTime>): GoalSummary[] {
+function toSummaries(rows: SummaryRow[], totals: Map<string, WorkTime>, ctx: ValCtx): GoalSummary[] {
   const names = new Map(rows.map(r => [r.id, r.name]));
-  return rows.map(r => toSummary(r, r.parentId ? names.get(r.parentId) ?? null : null, totals.get(r.id)));
+  return rows.map(r => toSummary(r, ctx, r.parentId ? names.get(r.parentId) ?? null : null, totals.get(r.id)));
 }
 
 type TaskRow = Prisma.GoalTaskGetPayload<{ include: { goal: { select: { name: true } } } }>;
@@ -179,15 +231,16 @@ async function loadTimeTotals(db: Db, userId: string): Promise<Map<string, WorkT
 }
 
 async function getSummaryById(db: Db, userId: string, id: string): Promise<GoalSummary | null> {
-  const [row, totals] = await Promise.all([
+  const [row, totals, cfg] = await Promise.all([
     db.goal.findFirst({ where: { id, userId }, select: summarySelect }),
     loadTimeTotals(db, userId),
+    getValidationConfig(db, userId),
   ]);
   if (!row) return null;
   const parent = row.parentId
     ? await db.goal.findFirst({ where: { id: row.parentId, userId }, select: { name: true } })
     : null;
-  return toSummary(row, parent?.name ?? null, totals.get(id));
+  return toSummary(row, { cfg, now: new Date() }, parent?.name ?? null, totals.get(id));
 }
 
 async function loadParentMap(db: Db, userId: string) {
@@ -258,11 +311,12 @@ function clampValue(metricType: MetricType, value: number): number {
 // ==========================================
 
 const loadGoalSummaries = async (userId: string) => {
-  const [rows, totals] = await Promise.all([
+  const [rows, totals, cfg] = await Promise.all([
     prisma.goal.findMany({ where: { userId }, select: summarySelect, orderBy: { createdAt: 'desc' } }),
     loadTimeTotals(prisma, userId),
+    getValidationConfig(prisma, userId),
   ]);
-  return toSummaries(rows, totals);
+  return toSummaries(rows, totals, { cfg, now: new Date() });
 };
 
 async function loadTaskDTOs(userId: string): Promise<GoalTaskDTO[]> {
@@ -277,31 +331,43 @@ async function loadTaskDTOs(userId: string): Promise<GoalTaskDTO[]> {
 
 export async function listGoals(): Promise<GoalSummary[]> {
   const userId = await requireAuth();
+  await resumeDueGoals(new Date(), userId);
   return loadGoalSummaries(userId);
 }
 
 // One call (one round trip) for everything the Goals page needs on load and after changes
 export async function getGoalsOverview(): Promise<{ goals: GoalSummary[]; tasks: GoalTaskDTO[] }> {
   const userId = await requireAuth();
+  await resumeDueGoals(new Date(), userId);
   const [goals, tasks] = await Promise.all([loadGoalSummaries(userId), loadTaskDTOs(userId)]);
   return { goals, tasks };
 }
 
 export async function getGoal(id: string): Promise<GoalDetail | null> {
   const userId = await requireAuth();
+  const now = new Date();
+  await resumeDueGoals(now, userId);
 
   // Independent queries run in parallel: against a remote database latency, not work, is the cost
-  const [goal, plans, children, tasks, map, totals] = await Promise.all([
-    prisma.goal.findFirst({ where: { id, userId }, select: { id: true, name: true, status: true, parentId: true } }),
+  const [goal, plans, children, tasks, map, totals, cfg, validations, pauses] = await Promise.all([
+    prisma.goal.findFirst({
+      where: { id, userId },
+      select: { ...summarySelect, pauseReason: true },
+    }),
     prisma.goalPlan.findMany({ where: { goalId: id, goal: { userId } }, orderBy: { updatedAt: 'desc' } }),
     prisma.goal.findMany({ where: { parentId: id, userId }, orderBy: { createdAt: 'asc' }, select: summarySelect }),
     prisma.goalTask.findMany({ where: { goalId: id, userId }, orderBy: { createdAt: 'asc' } }),
     loadParentMap(prisma, userId),
     loadTimeTotals(prisma, userId),
+    getValidationConfig(prisma, userId),
+    prisma.goalValidation.findMany({ where: { goalId: id, userId }, orderBy: { createdAt: 'desc' }, take: 20 }),
+    prisma.goalPause.findMany({ where: { goalId: id, userId }, orderBy: { pausedAt: 'desc' }, take: 10 }),
   ]);
   if (!goal) return null;
 
+  const ctx: ValCtx = { cfg, now };
   const time = totals.get(goal.id) ?? EMPTY_TIME;
+  const own = toSummary(goal, ctx);
   return {
     id: goal.id,
     name: goal.name,
@@ -311,8 +377,42 @@ export async function getGoal(id: string): Promise<GoalDetail | null> {
     shallowMinutes: time.shallowMinutes,
     ancestors: collectAncestors(map, goal.parentId),
     plans: plans.map(toPlanDTO),
-    children: children.map(c => toSummary(c, goal.name, totals.get(c.id))),
+    children: children.map(c => toSummary(c, ctx, goal.name, totals.get(c.id))),
     tasks: tasks.map(t => toTaskDTO({ ...t, goal: { name: goal.name } })),
+    validationEnabled: cfg.enabled,
+    validationPeriodDays: own.validationPeriodDays,
+    lastValidatedAt: own.lastValidatedAt,
+    validUntil: own.validUntil,
+    needsValidation: own.needsValidation,
+    pausedUntil: own.pausedUntil,
+    pauseReason: goal.pauseReason,
+    pausedByGoalId: goal.pausedByGoalId,
+    pausedByGoalName: goal.pausedByGoalId ? map.get(goal.pausedByGoalId)?.name ?? null : null,
+    validations: validations.map(toValidationDTO),
+    pauses: pauses.map(toPauseDTO),
+  };
+}
+
+function toValidationDTO(v: Prisma.GoalValidationGetPayload<object>): GoalValidationDTO {
+  return {
+    id: v.id,
+    direct: v.direct,
+    viaGoalName: v.viaGoalName,
+    text: v.text,
+    wordCount: v.wordCount,
+    createdAt: v.createdAt.toISOString(),
+  };
+}
+
+function toPauseDTO(p: Prisma.GoalPauseGetPayload<object>): GoalPauseDTO {
+  return {
+    id: p.id,
+    reason: p.reason,
+    pausedAt: p.pausedAt.toISOString(),
+    resumeAt: p.resumeAt.toISOString(),
+    resumedAt: iso(p.resumedAt),
+    resumeKind: p.resumeKind,
+    cascadedCount: p.cascadedCount,
   };
 }
 
@@ -322,18 +422,24 @@ export async function createGoal(input: { name: string; parentId?: string | null
   const name = cleanText(input?.name, LIMITS.goalName);
   if (!name) return fail(`Goal name is required (max ${LIMITS.goalName} characters).`);
 
-  let parentName: string | null = null;
   if (input.parentId) {
-    const parent = await prisma.goal.findFirst({ where: { id: input.parentId, userId }, select: { name: true } });
+    const parent = await prisma.goal.findFirst({ where: { id: input.parentId, userId }, select: { id: true } });
     if (!parent) return fail('Parent goal not found.');
-    parentName = parent.name;
   }
 
-  const created = await prisma.goal.create({
-    data: { userId, name, parentId: input.parentId || null },
-    select: summarySelect,
-  });
-  return ok(toSummary(created, parentName));
+  const id = await prisma.$transaction(async (tx) => {
+    const created = await tx.goal.create({ data: { userId, name, parentId: input.parentId || null }, select: { id: true } });
+    // A goal created under a paused goal is paused together with it
+    if (input.parentId) {
+      const map = await loadTree(tx, userId);
+      const root = pauseRootFrom(map, input.parentId);
+      if (root) await markCascadePaused(tx, [created.id], root, new Date());
+    }
+    return created.id;
+  }, TX_OPTIONS);
+
+  const summary = await getSummaryById(prisma, userId, id);
+  return summary ? ok(summary) : fail('Goal not found.');
 }
 
 export async function renameGoal(id: string, name: string): Promise<ActionResult<GoalSummary>> {
@@ -349,13 +455,47 @@ export async function renameGoal(id: string, name: string): Promise<ActionResult
   return summary ? ok(summary) : fail('Goal not found.');
 }
 
+// Pausing is only possible through pauseGoal(), which needs a reason and a resume date
 export async function setGoalStatus(id: string, status: GoalStatus): Promise<ActionResult<GoalSummary>> {
   const userId = await requireAuth();
 
   if (!isGoalStatus(status)) return fail('Invalid status.');
+  if (status === 'PAUSED') return fail('Use Pause to pause a goal. It needs a reason and a resume date.');
 
-  const result = await prisma.goal.updateMany({ where: { id, userId }, data: { status } });
-  if (result.count === 0) return fail('Goal not found.');
+  const error = await prisma.$transaction(async (tx) => {
+    const map = await loadTree(tx, userId);
+    const goal = map.get(id);
+    if (!goal) return 'Goal not found.';
+    if (goal.status === status) return null;
+    const now = new Date();
+
+    if (goal.status === 'PAUSED') {
+      const isRoot = !goal.pausedByGoalId;
+      if (status === 'IN_PROGRESS') {
+        if (!isRoot) return `Paused together with "${map.get(goal.pausedByGoalId!)?.name ?? 'another goal'}". Resume that goal instead.`;
+        await resumeTree(tx, userId, id, 'MANUAL', now);
+        return null;
+      }
+      // COMPLETED: the goals paused with it go back to in-progress
+      if (isRoot) await resumeTree(tx, userId, id, 'COMPLETED', now);
+      await tx.goal.update({ where: { id }, data: { status: 'COMPLETED' } });
+      await clearPauseFields(tx, id);
+      return null;
+    }
+
+    if (goal.status === 'COMPLETED' && status === 'IN_PROGRESS') {
+      // Reopened under a paused goal: it stays paused with that goal
+      const root = pauseRootFrom(map, goal.parentId);
+      if (root) {
+        await markCascadePaused(tx, [id], root, now);
+        return null;
+      }
+    }
+
+    await tx.goal.update({ where: { id }, data: { status } });
+    return null;
+  }, TX_OPTIONS);
+  if (error) return fail(error);
 
   const summary = await getSummaryById(prisma, userId, id);
   return summary ? ok(summary) : fail('Goal not found.');
@@ -367,7 +507,7 @@ export async function attachSubGoal(parentId: string, childId: string): Promise<
   if (parentId === childId) return fail('A goal cannot be its own sub-goal.');
 
   return prisma.$transaction(async (tx) => {
-    const map = await loadParentMap(tx, userId);
+    const map = await loadTree(tx, userId);
     const parent = map.get(parentId);
     const child = map.get(childId);
     if (!parent || !child) return fail('Goal not found.');
@@ -381,6 +521,14 @@ export async function attachSubGoal(parentId: string, childId: string): Promise<
     }
 
     await tx.goal.update({ where: { id: childId }, data: { parentId } });
+
+    // Joining a paused goal: the child and its in-progress descendants pause with it
+    const root = pauseRootFrom(map, parentId);
+    if (root) {
+      const ids = [child, ...descendantsOf(map, childId)].filter(n => n.status === 'IN_PROGRESS').map(n => n.id);
+      await markCascadePaused(tx, ids, root, new Date());
+    }
+
     const summary = await getSummaryById(tx, userId, childId);
     return summary ? ok(summary) : fail('Goal not found.');
   }, TX_OPTIONS);
@@ -389,8 +537,15 @@ export async function attachSubGoal(parentId: string, childId: string): Promise<
 export async function detachSubGoal(childId: string): Promise<ActionResult<GoalSummary>> {
   const userId = await requireAuth();
 
-  const result = await prisma.goal.updateMany({ where: { id: childId, userId }, data: { parentId: null } });
-  if (result.count === 0) return fail('Goal not found.');
+  const found = await prisma.$transaction(async (tx) => {
+    const exists = await tx.goal.updateMany({ where: { id: childId, userId }, data: { parentId: null } });
+    if (exists.count === 0) return false;
+    // Leaving the paused goal's tree: whatever was paused together with it resumes
+    const map = await loadTree(tx, userId);
+    await releaseCascade(tx, map, childId, new Date());
+    return true;
+  }, TX_OPTIONS);
+  if (!found) return fail('Goal not found.');
 
   const summary = await getSummaryById(prisma, userId, childId);
   return summary ? ok(summary) : fail('Goal not found.');
@@ -407,6 +562,16 @@ export async function deleteGoal(id: string): Promise<ActionResult<DeleteGoalRes
     });
     if (!goal) return fail('Goal not found.');
 
+    // Goals paused because of this goal resume; sub-goals paused under a higher goal leave that pause
+    const now = new Date();
+    const map = await loadTree(tx, userId);
+    await releaseGroup(tx, userId, id, now);
+    for (const child of map.values()) {
+      if (child.parentId === id && child.pausedByGoalId && child.pausedByGoalId !== id) {
+        await releaseCascade(tx, map, child.id, now);
+      }
+    }
+
     await tx.goal.delete({ where: { id } });
 
     return ok({
@@ -414,6 +579,160 @@ export async function deleteGoal(id: string): Promise<ActionResult<DeleteGoalRes
       unattachedTasks: goal._count.tasks,
       deletedPlans: goal._count.plans,
     });
+  }, TX_OPTIONS);
+}
+
+// ==========================================
+// PAUSE
+// ==========================================
+
+type PauseInput = { reason: string; resumeAt: string };
+
+function checkPauseInput(input: Partial<PauseInput>, reasonRequired: boolean): { error: string } | { reason: string | null; resumeAt: Date | null } {
+  let reason: string | null = null;
+  if (reasonRequired || input?.reason !== undefined) {
+    if (typeof input?.reason !== 'string') return { error: 'A reason is required.' };
+    reason = input.reason.trim();
+    if (reason.length > LONG_TEXT_MAX) return { error: `The reason is too long (max ${LONG_TEXT_MAX} characters).` };
+    if (countWords(reason) < PAUSE_MIN_WORDS) return { error: `Write at least ${PAUSE_MIN_WORDS} words explaining why you are pausing.` };
+  }
+
+  const resumeAt = typeof input?.resumeAt === 'string' ? new Date(input.resumeAt) : null;
+  if (!resumeAt || Number.isNaN(resumeAt.getTime())) return { error: 'Choose a valid resume date and time.' };
+  const now = Date.now();
+  if (resumeAt.getTime() < now + MIN_PAUSE_LEAD_MIN * 60_000) return { error: `The resume time must be at least ${MIN_PAUSE_LEAD_MIN} minutes from now.` };
+  if (resumeAt.getTime() > now + MAX_PAUSE_DAYS * 86_400_000) return { error: `A goal can be paused for at most ${MAX_PAUSE_DAYS} days.` };
+  return { reason, resumeAt };
+}
+
+export async function pauseGoal(
+  id: string,
+  input: PauseInput
+): Promise<ActionResult<{ summary: GoalSummary; cascadedCount: number }>> {
+  const userId = await requireAuth();
+
+  const checked = checkPauseInput(input, true);
+  if ('error' in checked) return fail(checked.error);
+  const { reason, resumeAt } = checked as { reason: string; resumeAt: Date };
+
+  const outcome = await prisma.$transaction(async (tx) => {
+    const map = await loadTree(tx, userId);
+    const goal = map.get(id);
+    if (!goal) return { error: 'Goal not found.' };
+    if (goal.status !== 'IN_PROGRESS') return { error: 'Only in-progress goals can be paused.' };
+    const above = pauseRootFrom(map, goal.parentId);
+    if (above) return { error: `Its parent "${above.name}" is already paused. Resume that goal first.` };
+    return { cascaded: await pauseTree(tx, userId, map, id, reason, resumeAt, new Date()) };
+  }, TX_OPTIONS);
+  if ('error' in outcome) return fail(outcome.error as string);
+
+  const summary = await getSummaryById(prisma, userId, id);
+  return summary ? ok({ summary, cascadedCount: outcome.cascaded }) : fail('Goal not found.');
+}
+
+// Change the resume date (and optionally the reason) of a goal that is itself paused
+export async function updatePause(id: string, input: { resumeAt: string; reason?: string }): Promise<ActionResult<GoalSummary>> {
+  const userId = await requireAuth();
+
+  const checked = checkPauseInput(input, false);
+  if ('error' in checked) return fail(checked.error);
+  const { reason, resumeAt } = checked as { reason: string | null; resumeAt: Date };
+
+  const error = await prisma.$transaction(async (tx) => {
+    const goal = await tx.goal.findFirst({ where: { id, userId }, select: { status: true, pausedByGoalId: true } });
+    if (!goal) return 'Goal not found.';
+    if (goal.status !== 'PAUSED' || goal.pausedByGoalId) return 'Only a goal that was paused directly can change its resume date.';
+
+    await tx.goal.update({ where: { id }, data: { pausedUntil: resumeAt, ...(reason ? { pauseReason: reason } : {}) } });
+    await tx.goal.updateMany({ where: { userId, pausedByGoalId: id }, data: { pausedUntil: resumeAt } });
+    await tx.goalPause.updateMany({
+      where: { goalId: id, resumedAt: null },
+      data: { resumeAt, ...(reason ? { reason } : {}) },
+    });
+    return null;
+  }, TX_OPTIONS);
+  if (error) return fail(error);
+
+  const summary = await getSummaryById(prisma, userId, id);
+  return summary ? ok(summary) : fail('Goal not found.');
+}
+
+// Early manual resume of a directly paused goal (and the goals paused with it)
+export async function resumeGoal(id: string): Promise<ActionResult<GoalSummary>> {
+  const userId = await requireAuth();
+
+  const error = await prisma.$transaction(async (tx) => {
+    const goal = await tx.goal.findFirst({ where: { id, userId }, select: { status: true, pausedByGoalId: true, parentId: true } });
+    if (!goal) return 'Goal not found.';
+    if (goal.status !== 'PAUSED') return null;
+    if (goal.pausedByGoalId) return 'This goal is paused together with another goal. Resume that goal instead.';
+    await resumeTree(tx, userId, id, 'MANUAL', new Date());
+    return null;
+  }, TX_OPTIONS);
+  if (error) return fail(error);
+
+  const summary = await getSummaryById(prisma, userId, id);
+  return summary ? ok(summary) : fail('Goal not found.');
+}
+
+// ==========================================
+// VALIDATION
+// ==========================================
+
+export async function setValidationPeriod(id: string, days: number): Promise<ActionResult<GoalSummary>> {
+  const userId = await requireAuth();
+
+  if (!Number.isInteger(days) || days < PERIOD_MIN || days > PERIOD_MAX) {
+    return fail(`The period must be a whole number of days between ${PERIOD_MIN} and ${PERIOD_MAX}.`);
+  }
+  const result = await prisma.goal.updateMany({ where: { id, userId }, data: { validationPeriodDays: days } });
+  if (result.count === 0) return fail('Goal not found.');
+
+  const summary = await getSummaryById(prisma, userId, id);
+  return summary ? ok(summary) : fail('Goal not found.');
+}
+
+// Validates the goal and every ancestor; each gets its own history row
+export async function validateGoal(id: string, text: string): Promise<ActionResult<{ validatedCount: number; validUntil: string | null }>> {
+  const userId = await requireAuth();
+
+  if (typeof text !== 'string') return fail('Write your validation first.');
+  const body = text.trim();
+  if (body.length > LONG_TEXT_MAX) return fail(`The text is too long (max ${LONG_TEXT_MAX} characters).`);
+  const words = countWords(body);
+  if (words < VALIDATION_MIN_WORDS) return fail(`Write at least ${VALIDATION_MIN_WORDS} words (you have ${words}).`);
+
+  return prisma.$transaction(async (tx) => {
+    const cfg = await getValidationConfig(tx, userId);
+    if (!cfg.enabled) return fail('Validation is turned off.');
+
+    const map = await loadParentMap(tx, userId);
+    const goal = map.get(id);
+    if (!goal) return fail('Goal not found.');
+    const row = await tx.goal.findFirst({ where: { id, userId }, select: { status: true, validationPeriodDays: true } });
+    if (!row || row.status !== 'IN_PROGRESS') return fail('Only in-progress goals can be validated.');
+
+    const ancestors = collectAncestors(map, goal.parentId);
+    const now = new Date();
+    await tx.goalValidation.createMany({
+      data: [
+        { userId, goalId: id, direct: true, text: body, wordCount: words, createdAt: now },
+        ...ancestors.map(a => ({
+          userId,
+          goalId: a.id,
+          direct: false,
+          viaGoalId: id,
+          viaGoalName: goal.name,
+          text: body,
+          wordCount: words,
+          createdAt: now,
+        })),
+      ],
+    });
+    await tx.goal.updateMany({ where: { userId, id: { in: [id, ...ancestors.map(a => a.id)] } }, data: { lastValidatedAt: now } });
+
+    const until = goalValidUntil({ status: row.status, validationPeriodDays: row.validationPeriodDays, lastValidatedAt: now, resumedAt: null }, cfg);
+    return ok({ validatedCount: 1 + ancestors.length, validUntil: iso(until) });
   }, TX_OPTIONS);
 }
 

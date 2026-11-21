@@ -51,10 +51,27 @@ The **Goals** tab (`/goals`) has three views: **Goals**, **Tasks** and **Graph**
 | Sub-goals | A strict tree: a goal has at most one parent. Detach it first to attach it elsewhere; cycles are rejected. |
 | Tasks | A goal task has one metric (count, percentage, duration, yes/no or custom unit) and belongs to at most one goal. Detach keeps it; delete removes it and its history. |
 | Deleting a goal | Its sub-goals become top-level, its tasks become unattached, and its plans are deleted. |
-| Status | `In progress`, `Paused` or `Completed`, set freely. |
+| Status | `In progress`, `Paused` or `Completed`. Pausing is only possible through the Pause dialog (see below). |
 
 Code lives in `app/goals/` (server actions in `actions.ts`), `components/goals/`, `lib/goals/` and `types/goals.ts`. The models (`Goal`, `GoalPlan`, `GoalTask`, `GoalTaskLog`) are additive: run `npx prisma db push` to create them.
 The graph uses [React Flow](https://reactflow.dev) (`@xyflow/react`).
+
+### Goal validation and pausing
+
+The shield icon in the header opens the **Validation** settings. It is opt-in: until it is switched on there are no validate buttons or reminders.
+
+| Rule | Behaviour |
+| --- | --- |
+| Validating | In an open goal, **Validate** needs at least 100 words. The goal and all its ancestors are validated and each gets a history row. Updating tasks never validates. |
+| Validity | A validation lasts until the Nth next "day start" (default 07:00 in your timezone), where N is the goal's own period (1-30 days, default 1). |
+| Needs validation | In-progress goals that were never validated, whose validity ended, or that resumed after a pause. Paused and completed goals never need it. |
+| Reminders | Up to 4 daily times. At each one the cron sends a single push listing the goals that need validating, grouped by top-level goal. |
+| Pausing | Always needs a reason (at least 20 words) and a resume date at most 30 days ahead; this applies even when validation is off. In-progress sub-goals pause with it. |
+| Resuming | The goal and the sub-goals paused with it resume automatically at the resume time, need validation straight away, and send a "Goal resumed" push. **Resume now** resumes early (no push). Sub-goals paused with a parent can only be resumed through the parent. |
+
+Code lives in `lib/goalValidation/` (rules, pause/resume, digest), `app/validation/actions.ts`, `components/validation/` and `types/validation.ts`. Two cron producers (`goal-resume`, `validation-digest`) are registered in `lib/notifications/producers/`, so the every-minute cron ping from the push-notification setup is required for reminders and automatic resume.
+
+After pulling this feature run `npx prisma db push`, then once `node scripts/migrate-paused-goals.mjs` (moves goals paused under the old free-form status back to `IN_PROGRESS`; safe to re-run).
 
 ## Authentication and input limits
 

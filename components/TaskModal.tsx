@@ -90,7 +90,7 @@ export default function TaskModal({ isOpen, onClose, onSave, onDelete, initialTa
 
   return (
     <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-[#0e0e0e] border border-white/80 rounded-2xl w-full max-w-lg p-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-[#0e0e0e] border border-white/80 rounded-2xl w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain p-4 sm:p-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150">
         <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-neutral-800">
           <div>
             <h3 className="text-base font-bold text-white font-headline">{isEditing ? 'Edit Task' : 'Create New Task'}</h3>
@@ -166,7 +166,7 @@ export default function TaskModal({ isOpen, onClose, onSave, onDelete, initialTa
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-3.5 border-t border-neutral-800">
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-3.5 border-t border-neutral-800">
             {isEditing && onDelete ? (
               <button type="button" onClick={() => onDelete(initialTask!.id)} className="px-3.5 py-2 rounded-xl text-xs font-medium text-neutral-400 hover:text-white hover:bg-neutral-900 border border-neutral-800 flex items-center gap-1.5">
                 <Trash2 className="w-3.5 h-3.5" /><span>Delete Task</span>

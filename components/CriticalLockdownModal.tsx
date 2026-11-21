@@ -25,21 +25,21 @@ export default function CriticalLockdownModal({ task, onSubmitExcuse }: Critical
     <div className="fixed inset-0 z-[100] bg-red-950/90 backdrop-blur-xl flex items-center justify-center p-4 selection:bg-red-500 selection:text-white animate-in fade-in duration-300">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-red-900/20 via-black/80 to-black pointer-events-none"></div>
       
-      <div className="bg-black border-2 border-red-500/50 rounded-2xl w-full max-w-xl p-8 relative shadow-[0_0_100px_rgba(239,68,68,0.2)] flex flex-col gap-6">
+      <div className="bg-black border-2 border-red-500/50 rounded-2xl w-full max-w-xl max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain p-5 sm:p-8 relative shadow-[0_0_100px_rgba(239,68,68,0.2)] flex flex-col gap-4 sm:gap-6">
         
         {/* Warning Header */}
-        <div className="flex flex-col items-center text-center gap-3 border-b border-red-900/30 pb-6">
-          <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-500 animate-pulse">
-            <Lock className="w-8 h-8" />
+        <div className="flex flex-col items-center text-center gap-3 border-b border-red-900/30 pb-4 sm:pb-6">
+          <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-500 animate-pulse">
+            <Lock className="w-6 h-6 sm:w-8 sm:h-8" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-red-500 font-headline uppercase tracking-widest">Critical Deadline Missed</h2>
+            <h2 className="text-lg sm:text-2xl font-bold text-red-500 font-headline uppercase tracking-wider sm:tracking-widest">Critical Deadline Missed</h2>
             <p className="text-sm text-red-400/80 mt-1">Portal locked. Accountability required to proceed.</p>
           </div>
         </div>
 
         {/* The Missed Task */}
-        <div className="p-5 bg-red-950/20 border border-red-900/50 rounded-xl flex flex-col">
+        <div className="p-4 sm:p-5 bg-red-950/20 border border-red-900/50 rounded-xl flex flex-col">
           <ImportanceLightsHeader level={5} lightColor="red" />
           <p className="text-xs font-mono text-red-400/60 mb-1.5 mt-2 flex items-center gap-2">
             <AlertTriangle className="w-3.5 h-3.5" />
