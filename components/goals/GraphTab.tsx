@@ -8,7 +8,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { ChevronDown, Network } from 'lucide-react';
 import { useGoals } from '../../app/goals/GoalsProvider';
-import type { GoalTree } from '../../types/goals';
+import type { GoalSummary, GoalTree } from '../../types/goals';
 import { buildGoalTree } from '../../lib/goals/graph';
 import { layoutTree } from '../../lib/goals/treeLayout';
 import GoalPicker from './GoalPicker';
@@ -141,29 +141,38 @@ export default function GraphTab() {
   const [chosenRootId, setChosenRootId] = useState<string | null>(null);
   const [depth, setDepth] = useState<1 | 2>(1);
   const [showTasks, setShowTasks] = useState(false);
+  const [onlyInProgress, setOnlyInProgress] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // The user's pick wins while it still exists; otherwise fall back to a sensible default
+  // The user's pick wins while it still exists and matches the filter; otherwise fall back to a sensible default
   const rootId = useMemo(() => {
-    if (chosenRootId && goals.some(g => g.id === chosenRootId)) return chosenRootId;
+    const matchesFilter = (g: GoalSummary) => !onlyInProgress || g.status === 'IN_PROGRESS';
+    if (chosenRootId) {
+      const chosen = goals.find(g => g.id === chosenRootId);
+      if (chosen && matchesFilter(chosen)) return chosen.id;
+    }
+    const pool = goals.filter(matchesFilter);
     const candidate =
-      goals.find(g => !g.parentId && g.status !== 'COMPLETED' && g.subGoalCount > 0) ??
-      goals.find(g => !g.parentId && g.status !== 'COMPLETED') ??
-      goals[0] ?? null;
+      pool.find(g => !g.parentId && g.status !== 'COMPLETED' && g.subGoalCount > 0) ??
+      pool.find(g => !g.parentId && g.status !== 'COMPLETED') ??
+      pool[0] ?? null;
     return candidate?.id ?? null;
-  }, [chosenRootId, goals]);
+  }, [chosenRootId, goals, onlyInProgress]);
 
   const visibleTree = useMemo(
-    () => (rootId ? buildGoalTree(goals, tasks, rootId, depth, showTasks) : null),
-    [goals, tasks, rootId, depth, showTasks],
+    () => (rootId ? buildGoalTree(goals, tasks, rootId, depth, showTasks, onlyInProgress) : null),
+    [goals, tasks, rootId, depth, showTasks, onlyInProgress],
   );
 
   const root = goals.find(g => g.id === rootId) ?? null;
 
   const pickable = useMemo(
-    () => goals.filter(g => showCompleted || g.status !== 'COMPLETED' || g.id === rootId),
-    [goals, showCompleted, rootId],
+    () => goals.filter(g => {
+      if (onlyInProgress) return g.status === 'IN_PROGRESS';
+      return showCompleted || g.status !== 'COMPLETED' || g.id === rootId;
+    }),
+    [goals, onlyInProgress, showCompleted, rootId],
   );
 
   if (!loading && goals.length === 0) {
@@ -207,6 +216,7 @@ export default function GraphTab() {
                   goals={pickable}
                   onPick={g => { setChosenRootId(g.id); setPickerOpen(false); }}
                   placeholder="Search goals…"
+                  emptyText={onlyInProgress ? 'No in-progress goals found.' : undefined}
                 />
               </div>
             </>
@@ -231,12 +241,33 @@ export default function GraphTab() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 lg:ml-auto text-xs text-neutral-400">
+        <div className="flex flex-wrap items-center gap-4 lg:ml-auto text-xs text-neutral-400">
           <label className="flex items-center gap-2 cursor-pointer select-none hover:text-white transition-colors">
             <input type="checkbox" checked={showTasks} onChange={e => setShowTasks(e.target.checked)} className="accent-white w-3.5 h-3.5" /> Show tasks
           </label>
           <label className="flex items-center gap-2 cursor-pointer select-none hover:text-white transition-colors">
-            <input type="checkbox" checked={showCompleted} onChange={e => setShowCompleted(e.target.checked)} className="accent-white w-3.5 h-3.5" /> Show completed
+            <input
+              type="checkbox"
+              checked={onlyInProgress}
+              onChange={e => {
+                const next = e.target.checked;
+                setOnlyInProgress(next);
+                if (next) setShowCompleted(false);
+              }}
+              className="accent-white w-3.5 h-3.5"
+            /> In progress only
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer select-none hover:text-white transition-colors">
+            <input
+              type="checkbox"
+              checked={showCompleted}
+              onChange={e => {
+                const next = e.target.checked;
+                setShowCompleted(next);
+                if (next) setOnlyInProgress(false);
+              }}
+              className="accent-white w-3.5 h-3.5"
+            /> Show completed
           </label>
         </div>
       </div>
@@ -249,13 +280,19 @@ export default function GraphTab() {
             </ReactFlowProvider>
             {!hasChildren && !showTasks && (
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 rounded-full border border-neutral-800 bg-black/90 px-4 py-2 text-[11px] text-neutral-400 text-center">
-                This goal has no sub-goals yet. Open it to create or link one.
+                {onlyInProgress && (root?.subGoalCount ?? 0) > 0
+                  ? 'No in-progress sub-goals under this goal.'
+                  : 'This goal has no sub-goals yet. Open it to create or link one.'}
               </div>
             )}
           </>
         ) : (
           <div className="h-full flex items-center justify-center text-xs font-mono text-neutral-600">
-            {loading ? 'Building graph…' : 'Select a parent goal to see its branches.'}
+            {loading
+              ? 'Building graph…'
+              : onlyInProgress
+                ? 'No in-progress goals to display.'
+                : 'Select a parent goal to see its branches.'}
           </div>
         )}
       </div>

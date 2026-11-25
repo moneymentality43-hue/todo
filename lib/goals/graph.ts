@@ -13,15 +13,18 @@ export function buildGoalTree(
   rootId: string,
   depth: 1 | 2,
   includeTasks: boolean,
+  onlyInProgress = false,
 ): GoalTree | null {
   const maxLevel = depth === 2 ? 2 : 1;
   const byId = new Map(goals.map(g => [g.id, g]));
   const root = byId.get(rootId);
   if (!root) return null;
+  if (onlyInProgress && root.status !== 'IN_PROGRESS') return null;
 
   const childrenOf = new Map<string, GoalSummary[]>();
   for (const g of goals) {
     if (!g.parentId) continue;
+    if (onlyInProgress && g.status !== 'IN_PROGRESS') continue;
     const list = childrenOf.get(g.parentId) ?? [];
     list.push(g);
     childrenOf.set(g.parentId, list);
