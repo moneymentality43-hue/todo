@@ -1,11 +1,10 @@
 // Pure tidy-tree layout: every parent is centred above its children, leaves never overlap
-
 export interface LayoutNode { id: string; level: number }
 export interface LayoutEdge { source: string; target: string }
 
 export const NODE_WIDTH = 220;
-export const H_GAP = 36;
-export const V_GAP = 150;
+export const H_GAP = 48;
+export const V_GAP = 250;
 
 export function layoutTree(rootId: string, nodes: LayoutNode[], edges: LayoutEdge[]): Map<string, { x: number; y: number }> {
   const children = new Map<string, string[]>();
@@ -14,10 +13,11 @@ export function layoutTree(rootId: string, nodes: LayoutNode[], edges: LayoutEdg
     list.push(e.target);
     children.set(e.source, list);
   }
-  const levelOf = new Map(nodes.map(n => [n.id, n.level]));
 
+  const levelOf = new Map(nodes.map(n => [n.id, n.level]));
   const slot = NODE_WIDTH + H_GAP;
   const widths = new Map<string, number>();
+
   const measure = (id: string, seen: Set<string>): number => {
     if (seen.has(id)) return slot;
     seen.add(id);
@@ -26,6 +26,7 @@ export function layoutTree(rootId: string, nodes: LayoutNode[], edges: LayoutEdg
     widths.set(id, w);
     return w;
   };
+
   measure(rootId, new Set());
 
   const positions = new Map<string, { x: number; y: number }>();
@@ -38,7 +39,7 @@ export function layoutTree(rootId: string, nodes: LayoutNode[], edges: LayoutEdg
       cursor += widths.get(k) ?? slot;
     }
   };
-  place(rootId, 0);
 
+  place(rootId, 0);
   return positions;
 }
