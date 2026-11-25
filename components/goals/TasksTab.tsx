@@ -14,8 +14,7 @@ import TaskProgressCard from './TaskProgressCard';
 type Filter = 'ALL' | 'UNATTACHED' | 'ATTACHED';
 
 export default function TasksTab() {
-  const { tasks, goals, logs, loading, openGoal, patchTask, refresh, notify } = useGoals();
-
+  const { tasks, goals, logs, loading, openGoal, patchTask, notify } = useGoals();
   const [filter, setFilter] = useState<Filter>('ALL');
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
@@ -47,7 +46,6 @@ export default function TasksTab() {
       patchTask(res.data);
       notify(`Attached to “${goal.name}”`);
       closeAttach();
-      await refresh();
     } catch {
       notify('Could not attach the task.');
     } finally {
@@ -102,11 +100,10 @@ export default function TasksTab() {
         <div className="mt-3">
           <CreateTaskForm
             onCancel={() => setCreating(false)}
-            onCreated={async t => {
+            onCreated={t => {
               patchTask(t);
               setCreating(false);
               notify('Task created');
-              await refresh();
             }}
           />
         </div>
@@ -158,7 +155,6 @@ export default function TasksTab() {
               </h3>
               <button onClick={closeAttach} aria-label="Close" className="w-8 h-8 rounded-full text-neutral-500 hover:text-white flex items-center justify-center"><X className="w-4 h-4" /></button>
             </div>
-
             {pendingGoal ? (
               <div className="rounded-xl border border-neutral-700 bg-neutral-950 p-3">
                 <p className="text-xs text-neutral-300">

@@ -1,15 +1,15 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background, Controls, ReactFlow, ReactFlowProvider, useNodesState, useReactFlow,
   type Edge, type Node, type NodeMouseHandler,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { ChevronDown, Network } from 'lucide-react';
-import { getGoalTree } from '../../app/goals/actions';
 import { useGoals } from '../../app/goals/GoalsProvider';
 import type { GoalTree } from '../../types/goals';
+import { buildGoalTree } from '../../lib/goals/graph';
 import { layoutTree } from '../../lib/goals/treeLayout';
 import GoalPicker from './GoalPicker';
 import { GoalNode, TaskLeafNode, type GoalNodeData, type TaskNodeData } from './GoalNode';
@@ -18,34 +18,51 @@ import StatusBadge from './StatusBadge';
 // Defined outside the component so React Flow does not remount nodes on every render
 const nodeTypes = { goal: GoalNode, task: TaskLeafNode };
 
-function buildFlow(tree: GoalTree): { nodes: Node[]; edges: Edge[] } {
-  const positions = layoutTree(tree.rootId, tree.nodes.map(n => ({ id: n.id, level: n.level })), tree.edges);
-
-  const nodes: Node[] = tree.nodes.map(n => {
-    const position = positions.get(n.id) ?? { x: 0, y: 0 };
+function buildNodeData(tree: GoalTree): Map<string, GoalNodeData | TaskNodeData> {
+  const map = new Map<string, GoalNodeData | TaskNodeData>();
+  for (const n of tree.nodes) {
     if (n.kind === 'goal') {
-      const data: GoalNodeData = {
-        name: n.name, status: n.status, subGoalCount: n.subGoalCount, taskCount: n.taskCount, isRoot: n.id === tree.rootId,
-        deepMinutes: n.deepMinutes, shallowMinutes: n.shallowMinutes,
-      };
+      map.set(n.id, {
+        name: n.name,
+        status: n.status,
+        subGoalCount: n.subGoalCount,
+        taskCount: n.taskCount,
+        isRoot: n.id === tree.rootId,
+        deepMinutes: n.deepMinutes,
+        shallowMinutes: n.shallowMinutes,
+      });
+    } else {
+      map.set(n.id, {
+        title: n.title,
+        metricType: n.metricType,
+        unit: n.unit,
+        current: n.current,
+        target: n.target,
+        goalId: n.goalId,
+      });
+    }
+  }
+  return map;
+}
+
+function buildFlowNodes(tree: GoalTree): Node[] {
+  const positions = layoutTree(tree.rootId, tree.nodes.map(n => ({ id: n.id, level: n.level })), tree.edges);
+  const dataById = buildNodeData(tree);
+
+  return tree.nodes.map(n => {
+    const position = positions.get(n.id) ?? { x: 0, y: 0 };
+    const data = dataById.get(n.id)!;
+    if (n.kind === 'goal') {
       return { id: n.id, type: 'goal', position, data };
     }
-    const data: TaskNodeData = { title: n.title, metricType: n.metricType, unit: n.unit, current: n.current, target: n.target };
     return { id: n.id, type: 'task', position, data, draggable: true };
   });
+}
 
-  const taskIds = new Set(tree.nodes.filter(n => n.kind === 'task').map(n => n.id));
-  const edges: Edge[] = tree.edges.map(e => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    type: 'smoothstep',
-    style: taskIds.has(e.target)
-      ? { stroke: '#404040', strokeDasharray: '4 4' }
-      : { stroke: '#737373', strokeWidth: 1.5 },
-  }));
-
-  return { nodes, edges };
+function getTopologyKey(tree: GoalTree): string {
+  const nodeIds = tree.nodes.map(n => `${n.kind}:${n.id}:${n.level}`).sort().join(',');
+  const edgeIds = tree.edges.map(e => `${e.source}->${e.target}`).sort().join(',');
+  return `${tree.rootId}|${nodeIds}|${edgeIds}`;
 }
 
 interface FlowProps {
@@ -55,57 +72,77 @@ interface FlowProps {
 
 function Flow({ tree, onGoalClick }: FlowProps) {
   const { fitView } = useReactFlow();
-  const built = useMemo(() => buildFlow(tree), [tree]);
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(built.nodes);
+  const topologyKey = useMemo(() => getTopologyKey(tree), [tree]);
+
+  const edges = useMemo<Edge[]>(() => {
+    const taskIds = new Set(tree.nodes.filter(n => n.kind === 'task').map(n => n.id));
+    return tree.edges.map(e => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      type: 'smoothstep',
+      style: taskIds.has(e.target)
+        ? { stroke: '#404040', strokeDasharray: '4 4' }
+        : { stroke: '#737373', strokeWidth: 1.5 },
+    }));
+  }, [tree.nodes, tree.edges]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const lastTopology = useRef<string | null>(null);
 
   useEffect(() => {
-    setNodes(built.nodes);
-    const t = setTimeout(() => fitView({ padding: 0.25, duration: 300, maxZoom: 1.1 }), 60);
-    return () => clearTimeout(t);
-  }, [built, setNodes, fitView]);
+    if (lastTopology.current !== topologyKey) {
+      // Structure changed (or initial mount): compute layout and frame the graph
+      lastTopology.current = topologyKey;
+      setNodes(buildFlowNodes(tree));
+      const t = setTimeout(() => fitView({ padding: 0.25, duration: 300, maxZoom: 1.1 }), 60);
+      return () => clearTimeout(t);
+    }
+    // Data-only change (e.g., +15m or rename): skip layoutTree() and preserve dragged positions + camera
+    const dataById = buildNodeData(tree);
+    setNodes(prev => prev.map(n => {
+      const nextData = dataById.get(n.id);
+      return nextData ? { ...n, data: nextData } : n;
+    }));
+  }, [tree, topologyKey, setNodes, fitView]);
 
   const handleNodeClick: NodeMouseHandler = useCallback((_, node) => {
     if (node.type === 'goal') onGoalClick(node.id);
     else {
-      const t = tree.nodes.find(n => n.id === node.id);
-      if (t && t.kind === 'task') onGoalClick(t.goalId);
+      const data = node.data as TaskNodeData;
+      if (data?.goalId) onGoalClick(data.goalId);
     }
-  }, [onGoalClick, tree.nodes]);
+  }, [onGoalClick]);
 
   return (
-    <>
-      <ReactFlow
-        nodes={nodes}
-        edges={built.edges}
-        onNodesChange={onNodesChange}
-        onNodeClick={handleNodeClick}
-        nodeTypes={nodeTypes}
-        colorMode="dark"
-        nodesConnectable={false}
-        elementsSelectable={false}
-        minZoom={0.2}
-        maxZoom={1.6}
-        fitView
-        style={{ background: '#000000' }}
-      >
-        <Background color="#1f1f1f" gap={24} />
-        <Controls showInteractive={false} />
-      </ReactFlow>
-    </>
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      onNodesChange={onNodesChange}
+      onNodeClick={handleNodeClick}
+      nodeTypes={nodeTypes}
+      colorMode="dark"
+      nodesConnectable={false}
+      elementsSelectable={false}
+      minZoom={0.2}
+      maxZoom={1.6}
+      fitView
+      fitViewOptions={{ padding: 0.25, maxZoom: 1.1 }}
+      style={{ background: '#000000' }}
+    >
+      <Background color="#1f1f1f" gap={24} />
+      <Controls showInteractive={false} />
+    </ReactFlow>
   );
 }
 
 export default function GraphTab() {
-  const { goals, loading, version, openGoal, notify } = useGoals();
-
+  const { goals, tasks, loading, openGoal } = useGoals();
   const [chosenRootId, setChosenRootId] = useState<string | null>(null);
   const [depth, setDepth] = useState<1 | 2>(1);
   const [showTasks, setShowTasks] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-
-  const [tree, setTree] = useState<GoalTree | null>(null);
-  const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
   // The user's pick wins while it still exists; otherwise fall back to a sensible default
   const rootId = useMemo(() => {
@@ -117,28 +154,13 @@ export default function GraphTab() {
     return candidate?.id ?? null;
   }, [chosenRootId, goals]);
 
-  const requestKey = rootId ? `${rootId}|${depth}|${showTasks}|${version}` : null;
-  const fetching = requestKey !== null && loadedKey !== requestKey;
+  const visibleTree = useMemo(
+    () => (rootId ? buildGoalTree(goals, tasks, rootId, depth, showTasks) : null),
+    [goals, tasks, rootId, depth, showTasks],
+  );
 
-  useEffect(() => {
-    if (!rootId || !requestKey) return;
-    let cancelled = false;
-    getGoalTree(rootId, depth, showTasks)
-      .then(result => {
-        if (cancelled) return;
-        setTree(result);
-        setLoadedKey(requestKey);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setLoadedKey(requestKey);
-        notify('Could not load the graph.');
-      });
-    return () => { cancelled = true; };
-  }, [rootId, depth, showTasks, requestKey, notify]);
-
-  const visibleTree = tree && tree.rootId === rootId ? tree : null;
   const root = goals.find(g => g.id === rootId) ?? null;
+
   const pickable = useMemo(
     () => goals.filter(g => showCompleted || g.status !== 'COMPLETED' || g.id === rootId),
     [goals, showCompleted, rootId],
@@ -176,6 +198,7 @@ export default function GraphTab() {
               <ChevronDown className={`w-4 h-4 text-neutral-500 transition-transform ${pickerOpen ? 'rotate-180' : ''}`} />
             </span>
           </button>
+
           {pickerOpen && (
             <>
               <button aria-label="Close" className="fixed inset-0 z-20 cursor-default" onClick={() => setPickerOpen(false)} />
@@ -224,7 +247,7 @@ export default function GraphTab() {
             <ReactFlowProvider>
               <Flow tree={visibleTree} onGoalClick={id => openGoal(id)} />
             </ReactFlowProvider>
-            {!hasChildren && !showTasks && !fetching && (
+            {!hasChildren && !showTasks && (
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 rounded-full border border-neutral-800 bg-black/90 px-4 py-2 text-[11px] text-neutral-400 text-center">
                 This goal has no sub-goals yet. Open it to create or link one.
               </div>
@@ -232,10 +255,9 @@ export default function GraphTab() {
           </>
         ) : (
           <div className="h-full flex items-center justify-center text-xs font-mono text-neutral-600">
-            {loading || fetching ? 'Building graph…' : 'Select a parent goal to see its branches.'}
+            {loading ? 'Building graph…' : 'Select a parent goal to see its branches.'}
           </div>
         )}
-        {fetching && visibleTree && <div className="absolute top-3 left-3 z-10 text-[10px] font-mono text-neutral-500">Updating…</div>}
       </div>
     </div>
   );

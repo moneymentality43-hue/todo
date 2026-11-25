@@ -19,6 +19,12 @@ export default function SubGoalsSection({ detail }: SubGoalsSectionProps) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Merge live metrics (time rollups, task counts, renames) from GoalsProvider onto child rows
+  const liveChildren = useMemo(() => {
+    const byId = new Map(goals.map(g => [g.id, g]));
+    return detail.children.map(c => byId.get(c.id) ?? c);
+  }, [detail.children, goals]);
+
   // Only parentless goals can be linked, and never this goal or one of its ancestors
   const linkable = useMemo(() => {
     const blocked = new Set([detail.id, ...detail.ancestors.map(a => a.id)]);
@@ -69,7 +75,7 @@ export default function SubGoalsSection({ detail }: SubGoalsSectionProps) {
     <section aria-labelledby="subgoals-heading">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h3 id="subgoals-heading" className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-neutral-400 whitespace-nowrap">
-          <GitBranch className="w-3.5 h-3.5" /> Sub-goals <span className="text-neutral-600">{detail.children.length}</span>
+          <GitBranch className="w-3.5 h-3.5" /> Sub-goals <span className="text-neutral-600">{liveChildren.length}</span>
         </h3>
         <div className="flex items-center gap-2">
           <button onClick={() => setMode(m => (m === 'link' ? 'none' : 'link'))} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-neutral-700 text-xs text-white whitespace-nowrap hover:border-white active:scale-95 transition-all">
@@ -107,11 +113,11 @@ export default function SubGoalsSection({ detail }: SubGoalsSectionProps) {
         />
       )}
 
-      {detail.children.length === 0 ? (
+      {liveChildren.length === 0 ? (
         <p className="rounded-xl border border-dashed border-neutral-800 py-5 text-center text-xs text-neutral-600">No sub-goals attached.</p>
       ) : (
         <ul className="space-y-2">
-          {detail.children.map(c => (
+          {liveChildren.map(c => (
             <li key={c.id} className="flex items-center gap-2 rounded-xl border border-[#222222] bg-[#0f0f0f] pl-4 pr-2 py-2 hover:border-neutral-600 transition-colors">
               <button onClick={() => openGoal(c.id, 'push')} className="flex-1 min-w-0 flex items-center justify-between gap-3 py-1 text-left group">
                 <span className="min-w-0">

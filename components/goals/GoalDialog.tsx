@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ChevronRight, Ellipsis, Trash2, X } from 'lucide-react';
 import { getGoal, renameGoal, setGoalStatus, deleteGoal, resumeGoal, setValidationPeriod } from '../../app/goals/actions';
 import { useGoals } from '../../app/goals/GoalsProvider';
 import type { GoalDetail, GoalPlanDTO, GoalStatus } from '../../types/goals';
+import { VALIDATION_CHANGED_EVENT } from '../../types/validation';
 import StatusSelect from './StatusSelect';
 import WorkTimeBadge from './WorkTimeBadge';
 import PlansSection from './dialog/PlansSection';
@@ -28,11 +29,9 @@ export default function GoalDialog() {
 }
 
 function DialogBody({ goalId }: { goalId: string }) {
-  const { canGoBack, goBack, closeDialog, openGoal, version, refresh, notify } = useGoals();
-
+  const { goals, patchGoal, canGoBack, goBack, closeDialog, openGoal, version, refresh, notify } = useGoals();
   const [detail, setDetail] = useState<GoalDetail | null>(null);
   const [missing, setMissing] = useState(false);
-
   const [nameDraft, setNameDraft] = useState<string | null>(null); // null = not editing
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -43,6 +42,9 @@ function DialogBody({ goalId }: { goalId: string }) {
 
   const panelRef = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
+
+  // Live rolled-up time from GoalsProvider so +15m updates the header instantly without refetching getGoal
+  const liveGoal = useMemo(() => goals.find(g => g.id === goalId) ?? null, [goals, goalId]);
 
   // Load, and reload after every shared refresh (version bump)
   useEffect(() => {
@@ -106,11 +108,10 @@ function DialogBody({ goalId }: { goalId: string }) {
     const next = nameDraft.trim();
     setNameDraft(null);
     if (!next || next === detail.name) return;
-
     const res = await renameGoal(detail.id, next);
     if (res.ok === false) return notify(res.error);
     setDetail(d => (d ? { ...d, name: res.data.name } : d));
-    await refresh();
+    patchGoal(detail.id, { name: res.data.name });
   };
 
   const handleStatus = async (status: GoalStatus) => {
@@ -147,7 +148,15 @@ function DialogBody({ goalId }: { goalId: string }) {
     if (!detail) return;
     const res = await setValidationPeriod(detail.id, days);
     if (res.ok === false) return notify(res.error);
-    await refresh();
+    const patch = {
+      validationPeriodDays: res.data.validationPeriodDays,
+      validUntil: res.data.validUntil,
+      needsValidation: res.data.needsValidation,
+    };
+    patchGoal(detail.id, patch);
+    setDetail(d => (d ? { ...d, ...patch } : d));
+    // Changing the period can flip whether this goal is due, so refresh the header shield badge
+    window.dispatchEvent(new Event(VALIDATION_CHANGED_EVENT));
   };
 
   const handleModalDone = async (message: string) => {
@@ -266,9 +275,15 @@ function DialogBody({ goalId }: { goalId: string }) {
               </div>
             </div>
           )}
+
           {detail && (
-            <WorkTimeBadge deepMinutes={detail.deepMinutes} shallowMinutes={detail.shallowMinutes} className="mt-2" />
+            <WorkTimeBadge
+              deepMinutes={liveGoal?.deepMinutes ?? detail.deepMinutes}
+              shallowMinutes={liveGoal?.shallowMinutes ?? detail.shallowMinutes}
+              className="mt-2"
+            />
           )}
+
           {detail && <PauseBanner detail={detail} busy={resuming} onResume={handleResume} onChangeDate={() => setModal('pause-edit')} onOpenRoot={id => openGoal(id, 'push')} />}
           {detail && <ValidationBar detail={detail} onValidate={() => setModal('validate')} onPeriodChange={handlePeriod} />}
         </div>
@@ -293,14 +308,13 @@ function DialogBody({ goalId }: { goalId: string }) {
                 <DeleteGoalConfirm
                   goalName={detail.name}
                   subGoals={detail.children.length}
-                  tasks={detail.tasks.length}
+                  tasks={liveGoal?.taskCount ?? detail.tasks.length}
                   plans={detail.plans.length}
                   busy={deleting}
                   onCancel={() => setConfirmDelete(false)}
                   onConfirm={handleDelete}
                 />
               )}
-
               {editingPlanId ? (
                 editingPlan ? (
                   <PlanEditor
@@ -339,6 +353,7 @@ function DialogBody({ goalId }: { goalId: string }) {
           onValidated={n => handleModalDone(`Validated ${n} goal${n === 1 ? '' : 's'}`)}
         />
       )}
+
       {detail && (modal === 'pause' || modal === 'pause-edit') && (
         <PauseGoalDialog
           goalId={detail.id}

@@ -5,7 +5,7 @@ import { Clock, Minus, Plus } from 'lucide-react';
 import { logTaskTime, updateGoalTask } from '../../app/goals/actions';
 import { useGoals } from '../../app/goals/GoalsProvider';
 import { formatHours } from '../../lib/goals/time';
-import type { GoalTaskDTO, WorkType } from '../../types/goals';
+import { LIMITS, type GoalTaskDTO, type WorkType } from '../../types/goals';
 import WorkTypeToggle from './WorkTypeToggle';
 
 const QUICK_ADD: { label: string; minutes: number }[] = [
@@ -15,26 +15,27 @@ const QUICK_ADD: { label: string; minutes: number }[] = [
   { label: '+2h', minutes: 120 },
 ];
 
-// Deep/shallow type and manually logged time for a task; goal totals refresh after every change
+// Deep/shallow type and manually logged time for a task; goal rollups recompute automatically via GoalsProvider
 export default function TaskTimeRow({ task }: { task: GoalTaskDTO }) {
-  const { patchTask, refresh, notify } = useGoals();
+  const { patchTask, notify } = useGoals();
   const [open, setOpen] = useState(false);
   const [hours, setHours] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const afterChange = (updated: GoalTaskDTO) => {
-    patchTask(updated);
-    if (updated.goalId) refresh();
-  };
-
   const changeType = async (workType: WorkType) => {
     if (busy) return;
+    const previous = task;
+    patchTask({ ...task, workType });
     setBusy(true);
     try {
       const res = await updateGoalTask(task.id, { workType });
-      if (res.ok === false) return notify(res.error);
-      afterChange(res.data);
+      if (res.ok === false) {
+        patchTask(previous);
+        return notify(res.error);
+      }
+      patchTask(res.data);
     } catch {
+      patchTask(previous);
       notify('Could not change the work type.');
     } finally {
       setBusy(false);
@@ -43,13 +44,20 @@ export default function TaskTimeRow({ task }: { task: GoalTaskDTO }) {
 
   const log = async (deltaMin: number) => {
     if (busy || deltaMin === 0) return;
+    const previous = task;
+    const optimisticMin = Math.min(LIMITS.maxTimeMin, Math.max(0, Math.round(task.timeSpentMin + deltaMin)));
+    patchTask({ ...task, timeSpentMin: optimisticMin });
     setBusy(true);
     try {
       const res = await logTaskTime(task.id, { deltaMin });
-      if (res.ok === false) return notify(res.error);
-      afterChange(res.data);
+      if (res.ok === false) {
+        patchTask(previous);
+        return notify(res.error);
+      }
+      patchTask(res.data);
       setHours('');
     } catch {
+      patchTask(previous);
       notify('Could not log time. Please try again.');
     } finally {
       setBusy(false);
@@ -85,6 +93,7 @@ export default function TaskTimeRow({ task }: { task: GoalTaskDTO }) {
               </button>
             ))}
           </div>
+
           <div className="flex items-center gap-2">
             <input
               type="number"

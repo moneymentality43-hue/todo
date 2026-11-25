@@ -17,6 +17,7 @@ export type GoalNodeData = {
   shallowMinutes: number;
   isRoot: boolean;
 };
+
 export type GoalFlowNode = Node<GoalNodeData, 'goal'>;
 
 export type TaskNodeData = {
@@ -25,7 +26,9 @@ export type TaskNodeData = {
   unit: string | null;
   current: number;
   target: number;
+  goalId: string;
 };
+
 export type TaskFlowNode = Node<TaskNodeData, 'task'>;
 
 const hidden = '!opacity-0 !pointer-events-none !w-1 !h-1';

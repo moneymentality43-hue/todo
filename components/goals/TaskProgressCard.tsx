@@ -27,8 +27,7 @@ const FLUSH_DELAY_MS = 500;
 const HOLD_DELAY_MS = 380;
 
 export default function TaskProgressCard({ task, showGoalChip = true, onOpenGoal, onAttach, onStructuralChange }: TaskProgressCardProps) {
-  const { patchTask, removeTask, logs, requestLogs, addLog, popLog, notify, refresh } = useGoals();
-
+  const { patchTask, removeTask, logs, requestLogs, addLog, popLog, notify } = useGoals();
   const taskRef = useRef(task);
   taskRef.current = task;
 
@@ -38,10 +37,8 @@ export default function TaskProgressCard({ task, showGoalChip = true, onOpenGoal
   const [value, setValue] = useState(task.current);
   const [step, setStep] = useState(config.steps[0]);
   const [celebrate, setCelebrate] = useState(false);
-
   const [typing, setTyping] = useState(false);
   const [draft, setDraft] = useState('');
-
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -146,6 +143,7 @@ export default function TaskProgressCard({ task, showGoalChip = true, onOpenGoal
     }, HOLD_DELAY_MS);
   };
   const holdSpeed = useRef(140);
+
   const stopHold = () => {
     if (holdTimer.current) {
       clearTimeout(holdTimer.current);
@@ -192,6 +190,7 @@ export default function TaskProgressCard({ task, showGoalChip = true, onOpenGoal
     setDraft(String(value));
     setTyping(true);
   };
+
   const commitTyping = () => {
     setTyping(false);
     const n = Number(draft);
@@ -226,7 +225,6 @@ export default function TaskProgressCard({ task, showGoalChip = true, onOpenGoal
     patchTask(res.data);
     notify('Task detached from goal');
     onStructuralChange?.();
-    refresh();
   };
 
   const handleDelete = async () => {
@@ -238,7 +236,6 @@ export default function TaskProgressCard({ task, showGoalChip = true, onOpenGoal
     removeTask(task.id);
     notify('Task deleted');
     onStructuralChange?.();
-    refresh();
   };
 
   const taskLogs = useMemo(() => logs[task.id] ?? [], [logs, task.id]);
@@ -255,7 +252,6 @@ export default function TaskProgressCard({ task, showGoalChip = true, onOpenGoal
     <div className={`relative rounded-2xl border bg-[#0a0a0a] p-4 sm:p-5 transition-colors duration-300 ${
       done ? 'border-white/70' : 'border-[#222222] hover:border-neutral-700'
     } ${celebrate ? 'motion-safe:animate-[goal-glow_1.2s_ease-out]' : ''}`}>
-
       {/* Title row */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -386,7 +382,6 @@ export default function TaskProgressCard({ task, showGoalChip = true, onOpenGoal
                 <Plus className="w-5 h-5 stroke-[2.5]" />
               </button>
             </div>
-
             <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Step size">
               {config.steps.map(s => (
                 <button
@@ -424,7 +419,6 @@ export default function TaskProgressCard({ task, showGoalChip = true, onOpenGoal
               )}
             </div>
           </div>
-
           <button
             onClick={handleUndo}
             disabled={taskLogs.length === 0}

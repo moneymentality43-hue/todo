@@ -14,19 +14,17 @@ interface TasksSectionProps {
 }
 
 export default function TasksSection({ detail }: TasksSectionProps) {
-  const { tasks, patchTask, notify, refresh, openGoal } = useGoals();
+  const { tasks, loading, patchTask, notify, openGoal } = useGoals();
   const [mode, setMode] = useState<'none' | 'create' | 'attach'>('none');
   const [query, setQuery] = useState('');
   const [confirmMove, setConfirmMove] = useState<GoalTaskDTO | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Live values come from the shared task list; membership comes from the goal itself
-  const goalTasks = useMemo(() => {
-    const byId = new Map(tasks.map(t => [t.id, t]));
-    return detail.tasks
-      .map(t => byId.get(t.id) ?? t)
-      .filter(t => t.goalId === detail.id);
-  }, [detail.tasks, detail.id, tasks]);
+  // Read live tasks from GoalsProvider; fall back to detail.tasks only during initial direct-URL load
+  const goalTasks = useMemo(
+    () => (loading && tasks.length === 0 ? detail.tasks : tasks.filter(t => t.goalId === detail.id)),
+    [loading, tasks, detail.tasks, detail.id],
+  );
 
   const attachable = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -50,7 +48,6 @@ export default function TasksSection({ detail }: TasksSectionProps) {
       setMode('none');
       setQuery('');
       notify(move ? 'Task moved to this goal' : 'Task attached');
-      await refresh();
     } catch {
       notify('Could not attach the task.');
     } finally {
@@ -79,11 +76,10 @@ export default function TasksSection({ detail }: TasksSectionProps) {
           <CreateTaskForm
             goalId={detail.id}
             onCancel={() => setMode('none')}
-            onCreated={async t => {
+            onCreated={t => {
               patchTask(t);
               setMode('none');
               notify('Task created');
-              await refresh();
             }}
           />
         </div>
@@ -102,7 +98,6 @@ export default function TasksSection({ detail }: TasksSectionProps) {
             />
             <button onClick={() => { setMode('none'); setConfirmMove(null); }} aria-label="Close" className="w-8 h-8 mr-1 text-neutral-500 hover:text-white flex items-center justify-center"><X className="w-4 h-4" /></button>
           </div>
-
           {confirmMove && (
             <div className="m-2 rounded-lg border border-neutral-700 bg-neutral-950 p-3">
               <p className="text-xs text-neutral-300">
@@ -114,7 +109,6 @@ export default function TasksSection({ detail }: TasksSectionProps) {
               </div>
             </div>
           )}
-
           <ul className="max-h-56 overflow-y-auto p-1">
             {attachable.length === 0 ? (
               <li className="px-3 py-4 text-center text-xs text-neutral-600">{query ? 'No matches.' : 'No other tasks yet. Create a new one instead.'}</li>

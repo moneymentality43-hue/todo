@@ -3,10 +3,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { getGoalsOverview, getTaskLogs } from './actions';
+import { deriveGoalsAndTasks } from '../../lib/goals/derived';
 import type { GoalSummary, GoalTaskDTO, TaskLogDTO } from '../../types/goals';
 import { VALIDATION_CHANGED_EVENT, VALIDATION_SETTINGS_EVENT } from '../../types/validation';
 
 export type GoalsTab = 'goals' | 'tasks' | 'graph';
+
 const TABS: GoalsTab[] = ['goals', 'tasks', 'graph'];
 const LOG_WINDOW_DAYS = 120;
 
@@ -22,26 +24,22 @@ interface GoalsContextValue {
   tasks: GoalTaskDTO[];
   loading: boolean;
   loadError: string | null;
-  version: number; // bumps after every refresh so views (graph, dialog) refetch
+  version: number; // bumps after every refresh so open dialogs refetch server-only data (plans/history)
   refresh: () => Promise<void>;
-
   tab: GoalsTab;
   setTab: (tab: GoalsTab) => void;
-
   activeGoalId: string | null;
   canGoBack: boolean;
   openGoal: (id: string, mode?: 'root' | 'push') => void;
   goBack: () => void;
   closeDialog: () => void;
-
+  patchGoal: (id: string, patch: Partial<GoalSummary>) => void;
   patchTask: (task: GoalTaskDTO) => void;
   removeTask: (id: string) => void;
-
   logs: Record<string, TaskLogDTO[]>;
   requestLogs: (ids: string[]) => void;
   addLog: (log: TaskLogDTO) => void;
   popLog: (taskId: string) => void;
-
   notify: (message: string, options?: { actionLabel?: string; onAction?: () => void }) => void;
 }
 
@@ -55,12 +53,17 @@ export function useGoals() {
 
 export default function GoalsProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
-
-  const [goals, setGoals] = useState<GoalSummary[]>([]);
-  const [tasks, setTasks] = useState<GoalTaskDTO[]>([]);
+  const [rawGoals, setRawGoals] = useState<GoalSummary[]>([]);
+  const [rawTasks, setRawTasks] = useState<GoalTaskDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
+
+  // Derived live goals (with rolled-up deep/shallow minutes & counts) and tasks (with live goal names)
+  const { goals, tasks } = useMemo(
+    () => deriveGoalsAndTasks(rawGoals, rawTasks),
+    [rawGoals, rawTasks],
+  );
 
   // Tab and open goal are initialised from the URL once, then mirrored back to it
   const [tab, setTabState] = useState<GoalsTab>(() => {
@@ -74,9 +77,9 @@ export default function GoalsProvider({ children }: { children: React.ReactNode 
 
   const [logs, setLogs] = useState<Record<string, TaskLogDTO[]>>({});
   const [toasts, setToasts] = useState<Toast[]>([]);
-
   const toastId = useRef(0);
   const hasLoaded = useRef(false);
+
   const requestedLogs = useRef<Set<string>>(new Set());
   const queuedLogIds = useRef<Set<string>>(new Set());
   const logTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -84,8 +87,8 @@ export default function GoalsProvider({ children }: { children: React.ReactNode 
   const refresh = useCallback(async () => {
     try {
       const { goals: g, tasks: t } = await getGoalsOverview();
-      setGoals(g);
-      setTasks(t);
+      setRawGoals(g);
+      setRawTasks(t);
       setLoadError(null);
       window.dispatchEvent(new Event(VALIDATION_CHANGED_EVENT));
       // The first load must not bump the version, otherwise an open dialog would fetch its goal twice
@@ -131,14 +134,20 @@ export default function GoalsProvider({ children }: { children: React.ReactNode 
   const openGoal = useCallback((id: string, mode: 'root' | 'push' = 'root') => {
     setStack(prev => (mode === 'push' && prev.length > 0 ? [...prev, id] : [id]));
   }, []);
+
   const goBack = useCallback(() => setStack(prev => prev.slice(0, -1)), []);
   const closeDialog = useCallback(() => setStack([]), []);
 
-  const patchTask = useCallback((task: GoalTaskDTO) => {
-    setTasks(prev => (prev.some(t => t.id === task.id) ? prev.map(t => (t.id === task.id ? task : t)) : [task, ...prev]));
+  const patchGoal = useCallback((id: string, patch: Partial<GoalSummary>) => {
+    setRawGoals(prev => prev.map(g => (g.id === id ? { ...g, ...patch } : g)));
   }, []);
+
+  const patchTask = useCallback((task: GoalTaskDTO) => {
+    setRawTasks(prev => (prev.some(t => t.id === task.id) ? prev.map(t => (t.id === task.id ? task : t)) : [task, ...prev]));
+  }, []);
+
   const removeTask = useCallback((id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
+    setRawTasks(prev => prev.filter(t => t.id !== id));
   }, []);
 
   // Cards ask for their own logs; requests made in the same tick are fetched in one call
@@ -150,7 +159,6 @@ export default function GoalsProvider({ children }: { children: React.ReactNode 
       }
     }
     if (queuedLogIds.current.size === 0 || logTimer.current) return;
-
     logTimer.current = setTimeout(async () => {
       logTimer.current = null;
       const batch = [...queuedLogIds.current];
@@ -174,6 +182,7 @@ export default function GoalsProvider({ children }: { children: React.ReactNode 
   const addLog = useCallback((log: TaskLogDTO) => {
     setLogs(prev => ({ ...prev, [log.goalTaskId]: [...(prev[log.goalTaskId] ?? []), log] }));
   }, []);
+
   const popLog = useCallback((taskId: string) => {
     setLogs(prev => ({ ...prev, [taskId]: (prev[taskId] ?? []).slice(0, -1) }));
   }, []);
@@ -188,15 +197,14 @@ export default function GoalsProvider({ children }: { children: React.ReactNode 
     goals, tasks, loading, loadError, version, refresh,
     tab, setTab,
     activeGoalId, canGoBack: stack.length > 1, openGoal, goBack, closeDialog,
-    patchTask, removeTask,
+    patchGoal, patchTask, removeTask,
     logs, requestLogs, addLog, popLog,
     notify,
-  }), [goals, tasks, loading, loadError, version, refresh, tab, setTab, activeGoalId, stack.length, openGoal, goBack, closeDialog, patchTask, removeTask, logs, requestLogs, addLog, popLog, notify]);
+  }), [goals, tasks, loading, loadError, version, refresh, tab, setTab, activeGoalId, stack.length, openGoal, goBack, closeDialog, patchGoal, patchTask, removeTask, logs, requestLogs, addLog, popLog, notify]);
 
   return (
     <GoalsContext.Provider value={value}>
       {children}
-
       <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[70] flex flex-col items-center gap-2 pointer-events-none w-[calc(100%-2rem)] max-w-sm" role="status" aria-live="polite">
         {toasts.map(t => (
           <div key={t.id} className="pointer-events-auto flex items-center gap-3 rounded-full bg-white text-black pl-4 pr-2 py-2 text-xs font-medium shadow-2xl motion-safe:animate-[goal-toast_0.2s_ease-out]">
